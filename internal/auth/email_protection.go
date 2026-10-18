@@ -55,7 +55,11 @@ func (protector EmailProtector) Decrypt(encryptedEmail EncryptedEmail) (string, 
 }
 
 func (protector EmailProtector) Hash(email string) string {
+	return base64.StdEncoding.EncodeToString(protector.keyedHash(NormalizeEmail(email)))
+}
+
+func (protector EmailProtector) keyedHash(message string) []byte {
 	hasher, _ := blake2b.New256(protector.hashKey[:])
-	hasher.Write([]byte(NormalizeEmail(email)))
-	return base64.StdEncoding.EncodeToString(hasher.Sum(nil))
+	hasher.Write([]byte(message))
+	return hasher.Sum(nil)
 }

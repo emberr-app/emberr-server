@@ -3,6 +3,7 @@ package store
 import (
 	"bytes"
 	"context"
+	"crypto/rand"
 	"errors"
 	"os"
 	"slices"
@@ -13,17 +14,16 @@ import (
 	"github.com/golang-migrate/migrate/v4/source/iofs"
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
+
+	"github.com/emberr-app/emberr-server/internal/testutil"
 )
 
-const (
-	testDatabaseNamePrefix = "emberr_test"
-	testMigrationsFolder   = "../../migrations"
-)
+const testMigrationsFolder = "../../migrations"
 
 var accountTableNames = []string{"account_keys", "accounts", "email_codes", "rate_limits", "sessions"}
 
 func TestMigrationsCreateAndDropAccountTables(t *testing.T) {
-	pool := openTestDatabase(t)
+	pool := openThrowawayDatabase(t)
 	migrator := newTestMigrator(t, pool)
 
 	runMigration(t, "up", migrator.Up)
@@ -43,7 +43,7 @@ func TestMigrationsCreateAndDropAccountTables(t *testing.T) {
 }
 
 func TestDeletingAnAccountRemovesItsKeysAndSessions(t *testing.T) {
-	pool := openTestDatabase(t)
+	pool := testutil.OpenTestDatabase(t)
 	runMigration(t, "up", newTestMigrator(t, pool).Up)
 	ctx := t.Context()
 
@@ -97,33 +97,28 @@ func TestDeletingAnAccountRemovesItsKeysAndSessions(t *testing.T) {
 	}
 }
 
-func openTestDatabase(t *testing.T) *pgxpool.Pool {
+func openThrowawayDatabase(t *testing.T) *pgxpool.Pool {
 	t.Helper()
 
-	var missingNames []string
-	for _, name := range []string{"PGHOST", "PGPORT", "PGDATABASE", "PGUSER", "PGPASSWORD"} {
-		if os.Getenv(name) == "" {
-			missingNames = append(missingNames, name)
+	testDatabase := testutil.OpenTestDatabase(t)
+	databaseName := testutil.TestDatabaseNamePrefix + "_migrations_" + strings.ToLower(rand.Text())
+	quotedDatabaseName := pgx.Identifier{databaseName}.Sanitize()
+	if _, err := testDatabase.Exec(t.Context(), `CREATE DATABASE `+quotedDatabaseName); err != nil {
+		t.Fatalf("create throwaway database: %v", err)
+	}
+	t.Cleanup(func() {
+		if _, err := testDatabase.Exec(context.Background(), `DROP DATABASE IF EXISTS `+quotedDatabaseName+` WITH (FORCE)`); err != nil {
+			t.Errorf("drop throwaway database: %v", err)
 		}
-	}
-	if len(missingNames) > 0 {
-		t.Fatalf("database tests need PGHOST, PGPORT, PGDATABASE, PGUSER and PGPASSWORD pointing at a test database whose name starts with %q; missing: %s",
-			testDatabaseNamePrefix, strings.Join(missingNames, ", "))
-	}
+	})
 
-	pool, err := pgxpool.New(t.Context(), "")
+	config := testDatabase.Config()
+	config.ConnConfig.Database = databaseName
+	pool, err := pgxpool.NewWithConfig(t.Context(), config)
 	if err != nil {
-		t.Fatalf("configure test database pool: %v", err)
+		t.Fatalf("configure throwaway database pool: %v", err)
 	}
 	t.Cleanup(pool.Close)
-
-	var databaseName string
-	if err := pool.QueryRow(t.Context(), `SELECT current_database()`).Scan(&databaseName); err != nil {
-		t.Fatalf("connect to test database: %v", err)
-	}
-	if !strings.HasPrefix(databaseName, testDatabaseNamePrefix) {
-		t.Fatalf("refusing to run database tests against %q: the test database name must start with %q", databaseName, testDatabaseNamePrefix)
-	}
 	return pool
 }
 
