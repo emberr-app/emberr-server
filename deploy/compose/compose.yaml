@@ -19,8 +19,11 @@ services:
       test: pg_isready -q -d "$${POSTGRES_DB}" -U "$${POSTGRES_USER}"
       interval: 2s
       start_period: 40s
+    ports:
+      - 127.0.0.1:5432:5432
     volumes:
       - postgres-data:/var/lib/postgresql/data
+      - ./create-test-database.sql:/docker-entrypoint-initdb.d/create-test-database.sql:ro,z
 
   mailpit:
     image: docker.io/axllent/mailpit:v1
