@@ -9,9 +9,13 @@ import (
 	"strings"
 
 	"github.com/emberr-app/emberr-server/internal/auth"
+	"github.com/emberr-app/emberr-server/internal/email"
 )
 
-const defaultHTTPPort = "8080"
+const (
+	defaultHTTPPort       = "8080"
+	defaultSMTPSenderName = "Emberr"
+)
 
 type serverSettings struct {
 	httpPort         string
@@ -24,6 +28,8 @@ type serverSettings struct {
 
 	emailEncryptionKey [auth.EmailEncryptionKeyLength]byte
 	emailHashKey       [auth.EmailHashKeyLength]byte
+
+	smtp email.SMTPSettings
 }
 
 func loadSettings() (serverSettings, error) {
@@ -44,6 +50,15 @@ func loadSettings() (serverSettings, error) {
 		databaseUser:     readRequired("EMBERR_DB_USER"),
 		databasePassword: readRequired("EMBERR_DB_PASSWORD"),
 		databaseSSLMode:  readRequired("EMBERR_DB_SSLMODE"),
+		smtp: email.SMTPSettings{
+			Host:       readRequired("EMBERR_SMTP_HOST"),
+			Port:       readRequired("EMBERR_SMTP_PORT"),
+			Username:   os.Getenv("EMBERR_SMTP_USERNAME"),
+			Password:   os.Getenv("EMBERR_SMTP_PASSWORD"),
+			FromEmail:  readRequired("EMBERR_SMTP_EMAIL"),
+			SenderName: os.Getenv("EMBERR_SMTP_SENDER_NAME"),
+			Encryption: os.Getenv("EMBERR_SMTP_ENCRYPTION"),
+		},
 	}
 	encodedEmailEncryptionKey := readRequired("EMBERR_KEY_ENCRYPTION")
 	encodedEmailHashKey := readRequired("EMBERR_KEY_HASH")
@@ -64,6 +79,9 @@ func loadSettings() (serverSettings, error) {
 
 	if settings.httpPort == "" {
 		settings.httpPort = defaultHTTPPort
+	}
+	if settings.smtp.SenderName == "" {
+		settings.smtp.SenderName = defaultSMTPSenderName
 	}
 	return settings, nil
 }

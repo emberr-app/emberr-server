@@ -14,6 +14,8 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 
 	"github.com/emberr-app/emberr-server/internal/api"
+	"github.com/emberr-app/emberr-server/internal/auth"
+	"github.com/emberr-app/emberr-server/internal/email"
 	"github.com/emberr-app/emberr-server/internal/store"
 )
 
@@ -52,9 +54,16 @@ func run() error {
 		return err
 	}
 
+	emailProtector := auth.NewEmailProtector(settings.emailEncryptionKey, settings.emailHashKey)
+	router := api.NewRouter(api.Services{
+		Database:   pool,
+		EmailCodes: auth.NewEmailCodes(pool, email.NewSMTPSender(settings.smtp), emailProtector),
+		RateLimits: store.NewRateLimitTable(pool),
+	})
+
 	server := &http.Server{
 		Addr:    net.JoinHostPort("", settings.httpPort),
-		Handler: api.NewRouter(pool),
+		Handler: router,
 	}
 
 	serverStopped := make(chan error, 1)
