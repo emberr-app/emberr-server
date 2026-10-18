@@ -1,0 +1,31 @@
+services:
+  server:
+    build:
+      context: ../..
+    ports:
+      - 8080:8080
+    depends_on:
+      postgres:
+        condition: service_healthy
+    env_file: .env
+
+  postgres:
+    image: docker.io/library/postgres:17
+    environment:
+      POSTGRES_USER: ${EMBERR_DB_USER}
+      POSTGRES_PASSWORD: ${EMBERR_DB_PASSWORD}
+      POSTGRES_DB: ${EMBERR_DB_NAME}
+    healthcheck:
+      test: pg_isready -q -d "$${POSTGRES_DB}" -U "$${POSTGRES_USER}"
+      interval: 2s
+      start_period: 40s
+    volumes:
+      - postgres-data:/var/lib/postgresql/data
+
+  mailpit:
+    image: docker.io/axllent/mailpit:v1
+    ports:
+      - 8025:8025
+
+volumes:
+  postgres-data:
