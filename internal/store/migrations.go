@@ -9,6 +9,7 @@ import (
 
 	"github.com/golang-migrate/migrate/v4"
 	migratepgx "github.com/golang-migrate/migrate/v4/database/pgx/v5"
+	"github.com/golang-migrate/migrate/v4/source"
 	"github.com/golang-migrate/migrate/v4/source/iofs"
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/jackc/pgx/v5/stdlib"
@@ -24,22 +25,31 @@ func ApplyMigrations(pool *pgxpool.Pool, migrationsFolder string) error {
 		return nil
 	}
 
-	database := stdlib.OpenDBFromPool(pool)
-	databaseDriver, err := migratepgx.WithInstance(database, &migratepgx.Config{})
+	migrator, err := newMigrator(pool, migrationFiles)
 	if err != nil {
-		database.Close()
-		return fmt.Errorf("prepare migration driver: %w", err)
+		return err
 	}
-	defer databaseDriver.Close()
-
-	migrator, err := migrate.NewWithInstance("iofs", migrationFiles, "pgx5", databaseDriver)
-	if err != nil {
-		return fmt.Errorf("create migrator: %w", err)
-	}
+	defer migrator.Close()
 
 	if err := migrator.Up(); err != nil && !errors.Is(err, migrate.ErrNoChange) {
 		return fmt.Errorf("apply migrations: %w", err)
 	}
 	slog.Info("database migrations up to date")
 	return nil
+}
+
+func newMigrator(pool *pgxpool.Pool, migrationFiles source.Driver) (*migrate.Migrate, error) {
+	database := stdlib.OpenDBFromPool(pool)
+	databaseDriver, err := migratepgx.WithInstance(database, &migratepgx.Config{})
+	if err != nil {
+		database.Close()
+		return nil, fmt.Errorf("prepare migration driver: %w", err)
+	}
+
+	migrator, err := migrate.NewWithInstance("iofs", migrationFiles, "pgx5", databaseDriver)
+	if err != nil {
+		databaseDriver.Close()
+		return nil, fmt.Errorf("create migrator: %w", err)
+	}
+	return migrator, nil
 }
