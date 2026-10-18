@@ -55,10 +55,13 @@ func run() error {
 	}
 
 	emailProtector := auth.NewEmailProtector(settings.emailEncryptionKey, settings.emailHashKey)
+	emailCodes := auth.NewEmailCodes(pool, email.NewSMTPSender(settings.smtp), emailProtector)
 	router := api.NewRouter(api.Services{
-		Database:   pool,
-		EmailCodes: auth.NewEmailCodes(pool, email.NewSMTPSender(settings.smtp), emailProtector),
-		RateLimits: store.NewRateLimitTable(pool),
+		Database:          pool,
+		EmailCodes:        emailCodes,
+		Accounts:          auth.NewAccounts(pool, emailCodes, emailProtector, settings.fakeSaltKey),
+		RateLimits:        store.NewRateLimitTable(pool),
+		MinimumAppVersion: settings.minimumAppVersion,
 	})
 
 	server := &http.Server{
