@@ -60,6 +60,7 @@ func run() error {
 		Database:          pool,
 		EmailCodes:        emailCodes,
 		Accounts:          auth.NewAccounts(pool, emailCodes, emailProtector, settings.fakeSaltKey),
+		Sessions:          auth.NewSessions(pool),
 		RateLimits:        store.NewRateLimitTable(pool),
 		MinimumAppVersion: settings.minimumAppVersion,
 	})

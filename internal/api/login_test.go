@@ -256,10 +256,12 @@ func newTestServer(t *testing.T) testServer {
 	emailProtector := auth.NewEmailProtector([auth.EmailEncryptionKeyLength]byte{1}, [auth.EmailHashKeyLength]byte{2})
 	mailSender := &testutil.FakeMailSender{}
 	emailCodes := auth.NewEmailCodes(pool, mailSender, emailProtector)
+	sessions := auth.NewSessions(pool)
 	router := NewRouter(Services{
 		Database:   pool,
 		EmailCodes: emailCodes,
 		Accounts:   auth.NewAccounts(pool, emailCodes, emailProtector, [auth.FakeSaltKeyLength]byte{3}),
+		Sessions:   sessions,
 		RateLimits: store.NewRateLimitTable(pool),
 	})
 	return testServer{
@@ -267,11 +269,15 @@ func newTestServer(t *testing.T) testServer {
 		pool:           pool,
 		emailProtector: emailProtector,
 		mailSender:     mailSender,
-		sessions:       auth.NewSessions(pool),
+		sessions:       sessions,
 	}
 }
 
 func (server testServer) send(method string, path string, body any) *httptest.ResponseRecorder {
+	return server.sendSignedIn(method, path, "", body)
+}
+
+func (server testServer) sendSignedIn(method string, path string, token string, body any) *httptest.ResponseRecorder {
 	var requestBody io.Reader = http.NoBody
 	if body != nil {
 		encodedBody, _ := json.Marshal(body)
@@ -279,6 +285,9 @@ func (server testServer) send(method string, path string, body any) *httptest.Re
 	}
 	request := httptest.NewRequest(method, path, requestBody)
 	request.RemoteAddr = fmt.Sprintf("[2001:db8::%x:%x]:4000", mathrand.Uint32(), mathrand.Uint32())
+	if token != "" {
+		request.Header.Set(sessionTokenHeader, token)
+	}
 	response := httptest.NewRecorder()
 	server.router.ServeHTTP(response, request)
 	return response
@@ -287,7 +296,12 @@ func (server testServer) send(method string, path string, body any) *httptest.Re
 func (server testServer) signUp(t *testing.T) testAccount {
 	t.Helper()
 
-	request := newTestSignupRequest(randomTestEmail(), "")
+	return server.signUpWith(t, newTestSignupRequest(randomTestEmail(), ""))
+}
+
+func (server testServer) signUpWith(t *testing.T, request signupRequest) testAccount {
+	t.Helper()
+
 	t.Cleanup(func() {
 		server.pool.Exec(context.Background(), `DELETE FROM accounts WHERE email_hash = $1`, server.emailProtector.Hash(request.Email))
 	})

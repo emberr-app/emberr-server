@@ -9,11 +9,19 @@ import (
 )
 
 const (
-	signupPath      = "/v1/auth/signup"
-	lockedKeyLength = 32 + 16
-	keyNonceLength  = 24
-	publicKeyLength = 32
+	signupPath               = "/v1/auth/signup"
+	lockedKeyLength          = 32 + 16
+	keyNonceLength           = 24
+	publicKeyLength          = 32
+	maxMemLimit              = 1 << 30
+	maxMemLimitTimesOpsLimit = 4 << 30
 )
+
+type base64Field struct {
+	name   string
+	value  string
+	length int
+}
 
 type signupRequest struct {
 	Email      string            `json:"email"`
@@ -59,15 +67,30 @@ func handleSignup(accounts *auth.Accounts) http.HandlerFunc {
 	}
 }
 
-func checkAccountKeys(keys store.AccountKeys) error {
-	if keys.MemLimit < auth.DefaultMemLimit || keys.OpsLimit < auth.DefaultOpsLimit {
+func checkPasswordSettings(memLimit int64, opsLimit int32) error {
+	if memLimit < auth.DefaultMemLimit || opsLimit < auth.DefaultOpsLimit {
 		return newBadRequestError(fmt.Sprintf("keys.memLimit must be at least %d and keys.opsLimit at least %d", auth.DefaultMemLimit, auth.DefaultOpsLimit))
 	}
-	fields := []struct {
-		name   string
-		value  string
-		length int
-	}{
+	if memLimit > maxMemLimit || memLimit*int64(opsLimit) > maxMemLimitTimesOpsLimit {
+		return newBadRequestError(fmt.Sprintf("keys.memLimit must be at most %d and keys.memLimit times keys.opsLimit at most %d", maxMemLimit, int64(maxMemLimitTimesOpsLimit)))
+	}
+	return nil
+}
+
+func checkBase64Fields(fields []base64Field) error {
+	for _, field := range fields {
+		if _, err := decodeBase64Field(field.name, field.value, field.length); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func checkAccountKeys(keys store.AccountKeys) error {
+	if err := checkPasswordSettings(keys.MemLimit, keys.OpsLimit); err != nil {
+		return err
+	}
+	return checkBase64Fields([]base64Field{
 		{"keys.salt", keys.PasswordSalt, auth.PasswordSaltLength},
 		{"keys.encryptedMasterKey", keys.EncryptedMasterKey, lockedKeyLength},
 		{"keys.encryptedMasterKeyNonce", keys.EncryptedMasterKeyNonce, keyNonceLength},
@@ -78,11 +101,5 @@ func checkAccountKeys(keys store.AccountKeys) error {
 		{"keys.publicKey", keys.PublicKey, publicKeyLength},
 		{"keys.encryptedPrivateKey", keys.EncryptedPrivateKey, lockedKeyLength},
 		{"keys.encryptedPrivateKeyNonce", keys.EncryptedPrivateKeyNonce, keyNonceLength},
-	}
-	for _, field := range fields {
-		if _, err := decodeBase64Field(field.name, field.value, field.length); err != nil {
-			return err
-		}
-	}
-	return nil
+	})
 }
