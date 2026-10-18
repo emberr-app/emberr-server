@@ -20,6 +20,13 @@ type Session struct {
 	LastUsedAt time.Time
 }
 
+type SessionSummary struct {
+	TokenHash  []byte
+	DeviceName string
+	CreatedAt  time.Time
+	LastUsedAt time.Time
+}
+
 type statementRunner interface {
 	Exec(ctx context.Context, sql string, arguments ...any) (pgconn.CommandTag, error)
 }
@@ -74,4 +81,36 @@ func (table SessionTable) Delete(ctx context.Context, tokenHash []byte) error {
 		return fmt.Errorf("delete session: %w", err)
 	}
 	return nil
+}
+
+func (table SessionTable) ListForAccount(ctx context.Context, accountID int64, usedSince time.Time) ([]SessionSummary, error) {
+	rows, err := table.pool.Query(ctx,
+		`SELECT token_hash, device_name, created_at, last_used_at FROM sessions
+		WHERE account_id = $1 AND last_used_at >= $2
+		ORDER BY created_at`,
+		accountID, usedSince.UnixMicro(),
+	)
+	if err != nil {
+		return nil, fmt.Errorf("list sessions: %w", err)
+	}
+	summaries, err := pgx.CollectRows(rows, func(row pgx.CollectableRow) (SessionSummary, error) {
+		var summary SessionSummary
+		var createdAtMicroseconds, lastUsedAtMicroseconds int64
+		err := row.Scan(&summary.TokenHash, &summary.DeviceName, &createdAtMicroseconds, &lastUsedAtMicroseconds)
+		summary.CreatedAt = time.UnixMicro(createdAtMicroseconds)
+		summary.LastUsedAt = time.UnixMicro(lastUsedAtMicroseconds)
+		return summary, err
+	})
+	if err != nil {
+		return nil, fmt.Errorf("read sessions: %w", err)
+	}
+	return summaries, nil
+}
+
+func (table SessionTable) DeleteForAccount(ctx context.Context, tokenHash []byte, accountID int64) (bool, error) {
+	result, err := table.pool.Exec(ctx, `DELETE FROM sessions WHERE token_hash = $1 AND account_id = $2`, tokenHash, accountID)
+	if err != nil {
+		return false, fmt.Errorf("delete session: %w", err)
+	}
+	return result.RowsAffected() > 0, nil
 }

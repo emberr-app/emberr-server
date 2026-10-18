@@ -29,3 +29,7 @@ func signedInAccountID(ctx context.Context) int64 {
 	accountID, _ := ctx.Value(signedInAccountIDKey).(int64)
 	return accountID
 }
+
+func signedInToken(r *http.Request) string {
+	return r.Header.Get(sessionTokenHeader)
+}

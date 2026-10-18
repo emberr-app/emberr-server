@@ -39,6 +39,7 @@ type Accounts struct {
 	sessionTable   store.SessionTable
 	rateLimits     store.RateLimitTable
 	emailCodes     *EmailCodes
+	mailSender     MailSender
 	emailProtector EmailProtector
 	fakeSaltKey    [FakeSaltKeyLength]byte
 }
@@ -49,6 +50,7 @@ func NewAccounts(pool *pgxpool.Pool, emailCodes *EmailCodes, emailProtector Emai
 		sessionTable:   store.NewSessionTable(pool),
 		rateLimits:     store.NewRateLimitTable(pool),
 		emailCodes:     emailCodes,
+		mailSender:     emailCodes.mailSender,
 		emailProtector: emailProtector,
 		fakeSaltKey:    fakeSaltKey,
 	}

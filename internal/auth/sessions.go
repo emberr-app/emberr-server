@@ -1,6 +1,7 @@
 package auth
 
 import (
+	"bytes"
 	"context"
 	"crypto/rand"
 	"crypto/sha256"
@@ -19,7 +20,19 @@ const (
 	sessionLastUsedUpdateInterval = time.Minute
 )
 
-var ErrInvalidSession = errors.New("invalid or expired session")
+var (
+	ErrInvalidSession     = errors.New("invalid or expired session")
+	ErrSessionNotFound    = errors.New("session not found")
+	ErrMalformedSessionID = errors.New("malformed session id")
+)
+
+type SessionDetails struct {
+	ID         string `json:"id"`
+	DeviceName string `json:"deviceName"`
+	CreatedAt  int64  `json:"createdAt"`
+	LastUsedAt int64  `json:"lastUsedAt"`
+	IsCurrent  bool   `json:"isCurrent"`
+}
 
 type Sessions struct {
 	sessionTable store.SessionTable
@@ -68,4 +81,38 @@ func (sessions *Sessions) AccountForToken(ctx context.Context, token string) (in
 		}
 	}
 	return session.AccountID, nil
+}
+
+func (sessions *Sessions) List(ctx context.Context, accountID int64, currentToken string) ([]SessionDetails, error) {
+	summaries, err := sessions.sessionTable.ListForAccount(ctx, accountID, time.Now().Add(-sessionIdleLimit))
+	if err != nil {
+		return nil, err
+	}
+	currentTokenHash := hashSessionToken(currentToken)
+	details := make([]SessionDetails, 0, len(summaries))
+	for _, summary := range summaries {
+		details = append(details, SessionDetails{
+			ID:         base64.RawURLEncoding.EncodeToString(summary.TokenHash),
+			DeviceName: summary.DeviceName,
+			CreatedAt:  summary.CreatedAt.UnixMicro(),
+			LastUsedAt: summary.LastUsedAt.UnixMicro(),
+			IsCurrent:  bytes.Equal(summary.TokenHash, currentTokenHash),
+		})
+	}
+	return details, nil
+}
+
+func (sessions *Sessions) SignOut(ctx context.Context, accountID int64, sessionID string) error {
+	tokenHash, err := base64.RawURLEncoding.DecodeString(sessionID)
+	if err != nil || len(tokenHash) != sha256.Size {
+		return ErrMalformedSessionID
+	}
+	deleted, err := sessions.sessionTable.DeleteForAccount(ctx, tokenHash, accountID)
+	if err != nil {
+		return err
+	}
+	if !deleted {
+		return ErrSessionNotFound
+	}
+	return nil
 }

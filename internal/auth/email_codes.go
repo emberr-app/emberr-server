@@ -83,14 +83,14 @@ func (emailCodes *EmailCodes) Send(ctx context.Context, email string, purpose Em
 	if err != nil {
 		return err
 	}
-	if accountExists != purpose.isForExistingAccount() {
-		return nil
-	}
 
 	code := newEmailCode()
 	codeHash := emailCodes.hashCode(emailHash, purpose, code)
 	if err := emailCodes.codeTable.Save(ctx, emailHash, string(purpose), codeHash, now.Add(emailCodeLifetime)); err != nil {
 		return err
+	}
+	if accountExists != purpose.isForExistingAccount() {
+		return nil
 	}
 
 	subject := "Verification code: " + code

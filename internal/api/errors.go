@@ -32,6 +32,9 @@ var (
 	errExpiredEmailCode = &apiError{Code: "EXPIRED_CODE", Message: "the email code has expired, ask for a new one", statusCode: http.StatusGone}
 	errInvalidToken     = &apiError{Code: "INVALID_TOKEN", Message: "sign in again", statusCode: http.StatusUnauthorized}
 	errUpgradeRequired  = &apiError{Code: "UPGRADE_REQUIRED", Message: "this app version is too old, update the app", statusCode: http.StatusUpgradeRequired}
+	errSessionNotFound  = &apiError{Code: "NOT_FOUND", Message: "no such session on this account", statusCode: http.StatusNotFound}
+	errEmailAlreadyUsed = &apiError{Code: "EMAIL_ALREADY_USED", Message: "another account already uses this email", statusCode: http.StatusForbidden}
+	errBadSessionID     = newBadRequestError("id is not a session id")
 )
 
 func writeError(w http.ResponseWriter, r *http.Request, err error) {
@@ -51,6 +54,12 @@ func writeError(w http.ResponseWriter, r *http.Request, err error) {
 		responseError = errExpiredEmailCode
 	case errors.Is(err, auth.ErrInvalidSession):
 		responseError = errInvalidToken
+	case errors.Is(err, auth.ErrSessionNotFound):
+		responseError = errSessionNotFound
+	case errors.Is(err, auth.ErrMalformedSessionID):
+		responseError = errBadSessionID
+	case errors.Is(err, auth.ErrEmailAlreadyUsed):
+		responseError = errEmailAlreadyUsed
 	default:
 		slog.ErrorContext(r.Context(), "request failed", "path", r.URL.Path, "error", err)
 		responseError = errInternal
