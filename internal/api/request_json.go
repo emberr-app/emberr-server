@@ -19,3 +19,8 @@ func readJSON(w http.ResponseWriter, r *http.Request, destination any) error {
 	}
 	return nil
 }
+
+func writeJSON(w http.ResponseWriter, value any) {
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(value)
+}

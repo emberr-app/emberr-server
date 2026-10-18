@@ -51,6 +51,7 @@ func (sender SMTPSender) Send(ctx context.Context, toEmail string, subject strin
 
 	client, err := smtp.NewClient(connection, sender.settings.Host)
 	if err != nil {
+		connection.Close()
 		return describeSMTPError("greet smtp server", err)
 	}
 	defer client.Close()

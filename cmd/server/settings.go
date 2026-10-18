@@ -8,6 +8,7 @@ import (
 	"os"
 	"strings"
 
+	"github.com/emberr-app/emberr-server/internal/api"
 	"github.com/emberr-app/emberr-server/internal/auth"
 	"github.com/emberr-app/emberr-server/internal/email"
 )
@@ -28,6 +29,9 @@ type serverSettings struct {
 
 	emailEncryptionKey [auth.EmailEncryptionKeyLength]byte
 	emailHashKey       [auth.EmailHashKeyLength]byte
+	fakeSaltKey        [auth.FakeSaltKeyLength]byte
+
+	minimumAppVersion api.AppVersion
 
 	smtp email.SMTPSettings
 }
@@ -62,6 +66,7 @@ func loadSettings() (serverSettings, error) {
 	}
 	encodedEmailEncryptionKey := readRequired("EMBERR_KEY_ENCRYPTION")
 	encodedEmailHashKey := readRequired("EMBERR_KEY_HASH")
+	encodedFakeSaltKey := readRequired("EMBERR_KEY_FAKE_SALT")
 	if len(missingNames) > 0 {
 		return serverSettings{}, fmt.Errorf("missing settings: %s", strings.Join(missingNames, ", "))
 	}
@@ -74,8 +79,21 @@ func loadSettings() (serverSettings, error) {
 	if err != nil {
 		return serverSettings{}, err
 	}
+	fakeSaltKey, err := decodeBase64Key("EMBERR_KEY_FAKE_SALT", encodedFakeSaltKey, auth.FakeSaltKeyLength)
+	if err != nil {
+		return serverSettings{}, err
+	}
 	settings.emailEncryptionKey = [auth.EmailEncryptionKeyLength]byte(emailEncryptionKey)
 	settings.emailHashKey = [auth.EmailHashKeyLength]byte(emailHashKey)
+	settings.fakeSaltKey = [auth.FakeSaltKeyLength]byte(fakeSaltKey)
+
+	if minimumAppVersion := os.Getenv("EMBERR_MIN_APP_VERSION"); minimumAppVersion != "" {
+		parsedVersion, valid := api.ParseAppVersion(minimumAppVersion)
+		if !valid {
+			return serverSettings{}, fmt.Errorf("EMBERR_MIN_APP_VERSION must look like 1.2.1, got %q", minimumAppVersion)
+		}
+		settings.minimumAppVersion = parsedVersion
+	}
 
 	if settings.httpPort == "" {
 		settings.httpPort = defaultHTTPPort
