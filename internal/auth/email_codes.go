@@ -19,10 +19,10 @@ type EmailCodePurpose string
 
 const (
 	EmailCodeForSignup          EmailCodePurpose = "signup"
-	EmailCodeForNewDevice       EmailCodePurpose = "login"
 	EmailCodeForRecovery        EmailCodePurpose = "recover"
 	EmailCodeForChangeEmail     EmailCodePurpose = "change"
 	EmailCodeForAccountDeletion EmailCodePurpose = "delete"
+	EmailCodeForPasswordChange  EmailCodePurpose = "password"
 )
 
 const (

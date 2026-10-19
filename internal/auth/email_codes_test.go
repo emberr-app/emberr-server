@@ -90,10 +90,11 @@ func sendTestCode(t *testing.T, emailCodes *EmailCodes, mailSender *testutil.Fak
 	if err := emailCodes.Send(t.Context(), email, EmailCodeForSignup); err != nil {
 		t.Fatalf("send code: %v", err)
 	}
-	if len(mailSender.SentMails) == 0 {
+	sentMails := mailSender.SentMails()
+	if len(sentMails) == 0 {
 		t.Fatal("no email was sent")
 	}
-	lastMail := mailSender.SentMails[len(mailSender.SentMails)-1]
+	lastMail := sentMails[len(sentMails)-1]
 	return strings.TrimPrefix(lastMail.Subject, "Verification code: ")
 }
 

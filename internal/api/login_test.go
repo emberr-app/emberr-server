@@ -24,7 +24,10 @@ import (
 	"github.com/emberr-app/emberr-server/internal/testutil"
 )
 
-const testDeviceName = "Test phone"
+const (
+	testDeviceName                = "Test phone"
+	verificationCodeSubjectPrefix = "Verification code: "
+)
 
 type testServer struct {
 	router         http.Handler
@@ -150,61 +153,30 @@ func TestWrongLoginKeyAndUnknownEmailGetTheSameAnswer(t *testing.T) {
 	}
 }
 
-func TestRightLoginKeySendsACodeAndGivesNoToken(t *testing.T) {
+func TestRightLoginKeyGivesAWorkingTokenAndTheKeysAndSendsOneLoginNotice(t *testing.T) {
 	server := newTestServer(t)
 	account := server.signUp(t)
-	mailsBeforeLogin := len(server.mailSender.SentMails)
 
-	response := server.send(http.MethodPost, loginPath, loginRequest{Email: account.email, LoginKey: account.loginKey, DeviceName: testDeviceName})
+	login := server.logIn(t, account)
 
-	if body := strings.TrimSpace(response.Body.String()); response.Code != http.StatusOK || body != `{"emailCodeNeeded":true}` {
-		t.Fatalf("login answered %d %s, want 200 {\"emailCodeNeeded\":true}", response.Code, body)
+	if login.Keys != account.keys {
+		t.Errorf("returned keys = %+v, want the keys sent at signup %+v", login.Keys, account.keys)
 	}
-	if len(server.mailSender.SentMails) != mailsBeforeLogin+1 {
-		t.Fatalf("login sent %d emails, want 1", len(server.mailSender.SentMails)-mailsBeforeLogin)
-	}
-	if loginMail := server.mailSender.SentMails[mailsBeforeLogin]; loginMail.ToEmail != account.email {
-		t.Fatalf("login code went to %q, want %q", loginMail.ToEmail, account.email)
-	}
-}
-
-func TestVerifyDeviceGivesATokenThatPassesTheSessionCheck(t *testing.T) {
-	server := newTestServer(t)
-	account := server.signUp(t)
-	server.logIn(t, account)
-
-	response := server.send(http.MethodPost, verifyDevicePath, verifyDeviceRequest{
-		Email: account.email, LoginKey: account.loginKey, Code: server.latestCode(t, account.email), DeviceName: "Test laptop",
-	})
-	if response.Code != http.StatusOK {
-		t.Fatalf("verify device: status = %d %s, want 200", response.Code, response.Body)
-	}
-	var body verifyDeviceResponse
-	if err := json.Unmarshal(response.Body.Bytes(), &body); err != nil {
-		t.Fatalf("read verify device answer: %v", err)
-	}
-	if body.Keys != account.keys {
-		t.Errorf("returned keys = %+v, want the keys sent at signup %+v", body.Keys, account.keys)
+	accountResponse := server.sendSignedIn(http.MethodGet, accountPath, login.Token, nil)
+	if accountResponse.Code != http.StatusOK || !strings.Contains(accountResponse.Body.String(), account.email) {
+		t.Fatalf("account details with the login token = %d %s, want 200 with the account's email", accountResponse.Code, accountResponse.Body)
 	}
 
-	newDeviceCheck := server.checkSession(body.Token)
-	signupDeviceCheck := server.checkSession(account.token)
-	if newDeviceCheck.Code != http.StatusOK || newDeviceCheck.Body.String() != signupDeviceCheck.Body.String() {
-		t.Fatalf("session check with the new token = %d %s, want 200 and the same account as the signup token (%s)",
-			newDeviceCheck.Code, newDeviceCheck.Body, signupDeviceCheck.Body)
+	notices := server.mailSender.WaitForMails(t, account.email, auth.NewLoginNoticeSubject)
+	if len(notices) != 1 {
+		t.Fatalf("login sent %d notices, want 1", len(notices))
 	}
-}
-
-func TestVerifyDeviceWithAWrongLoginKeyFailsEvenWithTheRightCode(t *testing.T) {
-	server := newTestServer(t)
-	account := server.signUp(t)
-	server.logIn(t, account)
-
-	response := server.send(http.MethodPost, verifyDevicePath, verifyDeviceRequest{
-		Email: account.email, LoginKey: randomBase64(auth.LoginKeyLength), Code: server.latestCode(t, account.email), DeviceName: "Test laptop",
-	})
-
-	requireErrorCode(t, response, http.StatusUnauthorized, "INVALID_PASSWORD")
+	if !strings.Contains(notices[0].Body, testDeviceName) {
+		t.Errorf("the notice %q does not name the device %q", notices[0].Body, testDeviceName)
+	}
+	if strings.Contains(notices[0].Body, "2001:db8") {
+		t.Errorf("the notice %q contains the client's IP address", notices[0].Body)
+	}
 }
 
 func TestUnknownSessionTokenIsRefused(t *testing.T) {
@@ -328,21 +300,27 @@ func (server testServer) requestSignupCode(t *testing.T, email string) {
 	}
 }
 
-func (server testServer) logIn(t *testing.T, account testAccount) {
+func (server testServer) logIn(t *testing.T, account testAccount) loginResponse {
 	t.Helper()
 
 	response := server.send(http.MethodPost, loginPath, loginRequest{Email: account.email, LoginKey: account.loginKey, DeviceName: testDeviceName})
 	if response.Code != http.StatusOK {
 		t.Fatalf("log in: status = %d %s, want 200", response.Code, response.Body)
 	}
+	var body loginResponse
+	if err := json.Unmarshal(response.Body.Bytes(), &body); err != nil {
+		t.Fatalf("read login answer: %v", err)
+	}
+	return body
 }
 
 func (server testServer) latestCode(t *testing.T, email string) string {
 	t.Helper()
 
-	for index := len(server.mailSender.SentMails) - 1; index >= 0; index-- {
-		if sentMail := server.mailSender.SentMails[index]; sentMail.ToEmail == email {
-			return strings.TrimPrefix(sentMail.Subject, "Verification code: ")
+	sentMails := server.mailSender.SentMails()
+	for index := len(sentMails) - 1; index >= 0; index-- {
+		if sentMail := sentMails[index]; sentMail.ToEmail == email && strings.HasPrefix(sentMail.Subject, verificationCodeSubjectPrefix) {
+			return strings.TrimPrefix(sentMail.Subject, verificationCodeSubjectPrefix)
 		}
 	}
 	t.Fatalf("no email code was sent to %s", email)

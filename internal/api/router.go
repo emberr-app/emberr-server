@@ -22,7 +22,6 @@ func NewRouter(services Services) http.Handler {
 	versionedRoutes.HandleFunc("GET "+paramsPath, limitRequestsPerIP(services.RateLimits, paramsPath, handleParams(services.Accounts)))
 	versionedRoutes.HandleFunc("POST "+signupPath, limitRequestsPerIP(services.RateLimits, signupPath, handleSignup(services.Accounts)))
 	versionedRoutes.HandleFunc("POST "+loginPath, limitRequestsPerIP(services.RateLimits, loginPath, handleLogin(services.Accounts)))
-	versionedRoutes.HandleFunc("POST "+verifyDevicePath, limitRequestsPerIP(services.RateLimits, verifyDevicePath, handleVerifyDevice(services.Accounts)))
 	versionedRoutes.HandleFunc("POST "+recoverPath, limitRequestsPerIP(services.RateLimits, recoverPath, handleRecover(services.Accounts)))
 
 	signedIn := func(handler http.HandlerFunc) http.Handler {

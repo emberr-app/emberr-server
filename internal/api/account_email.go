@@ -36,8 +36,10 @@ func handleAccountEmailCode(accounts *auth.Accounts) http.HandlerFunc {
 			err = sendChangeEmailCode(r.Context(), accounts, request.Email)
 		case auth.EmailCodeForAccountDeletion:
 			err = accounts.SendDeletionCode(r.Context(), signedInAccountID(r.Context()))
+		case auth.EmailCodeForPasswordChange:
+			err = accounts.SendPasswordChangeCode(r.Context(), signedInAccountID(r.Context()))
 		default:
-			err = newBadRequestError("purpose must be change or delete")
+			err = newBadRequestError("purpose must be change, delete or password")
 		}
 		if err != nil {
 			writeError(w, r, err)

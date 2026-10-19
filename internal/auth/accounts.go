@@ -3,6 +3,7 @@ package auth
 import (
 	"context"
 	"encoding/base64"
+	"log/slog"
 	"time"
 
 	"github.com/jackc/pgx/v5/pgxpool"
@@ -19,6 +20,8 @@ const (
 	loginAttemptLimit  = 10
 	loginAttemptWindow = time.Hour
 )
+
+const NewLoginNoticeSubject = "New login to your Emberr account"
 
 type PasswordParams struct {
 	Salt     string `json:"salt"`
@@ -95,19 +98,9 @@ func (accounts *Accounts) SignUp(ctx context.Context, signup Signup) (string, er
 	return token, nil
 }
 
-func (accounts *Accounts) LogIn(ctx context.Context, email string, loginKey []byte) error {
-	if _, err := accounts.checkLoginKey(ctx, email, loginKey); err != nil {
-		return err
-	}
-	return accounts.emailCodes.Send(ctx, email, EmailCodeForNewDevice)
-}
-
-func (accounts *Accounts) VerifyDevice(ctx context.Context, email string, loginKey []byte, code string, deviceName string) (string, store.AccountKeys, error) {
+func (accounts *Accounts) LogIn(ctx context.Context, email string, loginKey []byte, deviceName string) (string, store.AccountKeys, error) {
 	record, err := accounts.checkLoginKey(ctx, email, loginKey)
 	if err != nil {
-		return "", store.AccountKeys{}, err
-	}
-	if err := accounts.emailCodes.Check(ctx, email, EmailCodeForNewDevice, code); err != nil {
 		return "", store.AccountKeys{}, err
 	}
 
@@ -115,7 +108,21 @@ func (accounts *Accounts) VerifyDevice(ctx context.Context, email string, loginK
 	if err := accounts.sessionTable.Create(ctx, tokenHash, record.AccountID, deviceName); err != nil {
 		return "", store.AccountKeys{}, err
 	}
+	accounts.sendNewLoginNotice(ctx, email, deviceName)
 	return token, record.Keys, nil
+}
+
+func (accounts *Accounts) sendNewLoginNotice(ctx context.Context, email string, deviceName string) {
+	loginTime := time.Now().UTC().Format("02 Jan, 2006 15:04")
+	body := "We detected a new login to your Emberr account at " + loginTime + " UTC.\n\n" +
+		"Device: " + deviceName + "\n\n" +
+		"If this was not you, please change your password.\n"
+	contextThatOutlivesTheRequest := context.WithoutCancel(ctx)
+	go func() {
+		if err := accounts.mailSender.Send(contextThatOutlivesTheRequest, email, NewLoginNoticeSubject, body); err != nil {
+			slog.WarnContext(contextThatOutlivesTheRequest, "send new login notice failed", "error", err)
+		}
+	}()
 }
 
 func (accounts *Accounts) checkLoginKey(ctx context.Context, email string, loginKey []byte) (store.LoginRecord, error) {

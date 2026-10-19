@@ -39,6 +39,17 @@ func (table SessionTable) Create(ctx context.Context, tokenHash []byte, accountI
 	return insertSession(ctx, table.pool, tokenHash, accountID, deviceName)
 }
 
+func (table SessionTable) CreateWithPasswordReset(ctx context.Context, tokenHash []byte, accountID int64, deviceName string, passwordResetUntil time.Time) error {
+	_, err := table.pool.Exec(ctx,
+		`INSERT INTO sessions (token_hash, account_id, device_name, password_reset_until) VALUES ($1, $2, $3, $4)`,
+		tokenHash, accountID, deviceName, passwordResetUntil.UnixMicro(),
+	)
+	if err != nil {
+		return fmt.Errorf("insert session with password reset: %w", err)
+	}
+	return nil
+}
+
 func insertSession(ctx context.Context, database statementRunner, tokenHash []byte, accountID int64, deviceName string) error {
 	_, err := database.Exec(ctx,
 		`INSERT INTO sessions (token_hash, account_id, device_name) VALUES ($1, $2, $3)`,

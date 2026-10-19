@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"time"
 
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgconn"
@@ -62,16 +63,21 @@ type PasswordKeys struct {
 }
 
 type PasswordChange struct {
-	AccountID            int64
-	LoginKeyHash         string
-	Keys                 PasswordKeys
-	SignOutOtherSessions bool
-	CurrentTokenHash     []byte
+	AccountID                  int64
+	LoginKeyHash               string
+	Keys                       PasswordKeys
+	SignOutOtherSessions       bool
+	CurrentTokenHash           []byte
+	UsesPasswordResetAllowance bool
+	ChangedAt                  time.Time
 }
 
 const uniqueViolationCode = "23505"
 
-var ErrEmailHashTaken = errors.New("email hash already belongs to an account")
+var (
+	ErrEmailHashTaken           = errors.New("email hash already belongs to an account")
+	ErrNoPasswordResetAllowance = errors.New("session may not reset the password without a code")
+)
 
 const accountKeysColumns = `password_salt, mem_limit, ops_limit,
 	encrypted_master_key, encrypted_master_key_nonce,
@@ -176,6 +182,20 @@ func (table AccountTable) Find(ctx context.Context, accountID int64) (Account, b
 
 func (table AccountTable) ChangePassword(ctx context.Context, change PasswordChange) error {
 	err := pgx.BeginFunc(ctx, table.pool, func(tx pgx.Tx) error {
+		if change.UsesPasswordResetAllowance {
+			allowanceResult, err := tx.Exec(ctx,
+				`UPDATE sessions SET password_reset_until = NULL
+				WHERE token_hash = $1 AND account_id = $2 AND password_reset_until > $3`,
+				change.CurrentTokenHash, change.AccountID, change.ChangedAt.UnixMicro(),
+			)
+			if err != nil {
+				return fmt.Errorf("use password reset allowance: %w", err)
+			}
+			if allowanceResult.RowsAffected() == 0 {
+				return ErrNoPasswordResetAllowance
+			}
+		}
+
 		keys := change.Keys
 		_, err := tx.Exec(ctx,
 			`UPDATE account_keys SET
@@ -187,6 +207,10 @@ func (table AccountTable) ChangePassword(ctx context.Context, change PasswordCha
 		)
 		if err != nil {
 			return fmt.Errorf("update account keys: %w", err)
+		}
+		_, err = tx.Exec(ctx, `UPDATE sessions SET password_reset_until = NULL WHERE account_id = $1 AND password_reset_until IS NOT NULL`, change.AccountID)
+		if err != nil {
+			return fmt.Errorf("clear password reset allowances: %w", err)
 		}
 		if !change.SignOutOtherSessions {
 			return nil
