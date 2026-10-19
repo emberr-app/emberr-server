@@ -59,7 +59,7 @@ func TestEmailCodeAnswerIsTheSameForExistingAndUnknownEmails(t *testing.T) {
 	}
 
 	var recipients []string
-	for _, sentMail := range mailSender.SentMails {
+	for _, sentMail := range mailSender.SentMails() {
 		recipients = append(recipients, sentMail.ToEmail)
 	}
 	if wantRecipients := []string{unknownEmail, existingEmail}; !slices.Equal(recipients, wantRecipients) {

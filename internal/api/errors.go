@@ -35,6 +35,7 @@ var (
 	errSessionNotFound  = &apiError{Code: "NOT_FOUND", Message: "no such session on this account", statusCode: http.StatusNotFound}
 	errEmailAlreadyUsed = &apiError{Code: "EMAIL_ALREADY_USED", Message: "another account already uses this email", statusCode: http.StatusForbidden}
 	errBadSessionID     = newBadRequestError("id is not a session id")
+	errMissingEmailCode = newBadRequestError("code is missing")
 )
 
 func writeError(w http.ResponseWriter, r *http.Request, err error) {
@@ -60,6 +61,8 @@ func writeError(w http.ResponseWriter, r *http.Request, err error) {
 		responseError = errBadSessionID
 	case errors.Is(err, auth.ErrEmailAlreadyUsed):
 		responseError = errEmailAlreadyUsed
+	case errors.Is(err, auth.ErrEmailCodeMissing):
+		responseError = errMissingEmailCode
 	default:
 		slog.ErrorContext(r.Context(), "request failed", "path", r.URL.Path, "error", err)
 		responseError = errInternal

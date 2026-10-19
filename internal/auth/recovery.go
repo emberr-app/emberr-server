@@ -6,13 +6,17 @@ import (
 	"encoding/base64"
 	"errors"
 	"fmt"
+	"time"
 
 	"golang.org/x/crypto/nacl/box"
 
 	"github.com/emberr-app/emberr-server/internal/store"
 )
 
-const publicKeyLength = 32
+const (
+	publicKeyLength                = 32
+	passwordResetAllowanceLifetime = time.Hour
+)
 
 func (accounts *Accounts) Recover(ctx context.Context, email string, code string, deviceName string) (string, store.AccountKeys, error) {
 	if err := accounts.emailCodes.Check(ctx, email, EmailCodeForRecovery, code); err != nil {
@@ -31,9 +35,11 @@ func (accounts *Accounts) Recover(ctx context.Context, email string, code string
 	if err != nil {
 		return "", store.AccountKeys{}, err
 	}
-	if err := accounts.sessionTable.Create(ctx, tokenHash, record.AccountID, deviceName); err != nil {
+	passwordResetUntil := time.Now().Add(passwordResetAllowanceLifetime)
+	if err := accounts.sessionTable.CreateWithPasswordReset(ctx, tokenHash, record.AccountID, deviceName, passwordResetUntil); err != nil {
 		return "", store.AccountKeys{}, err
 	}
+	accounts.sendNewLoginNotice(ctx, email, deviceName)
 	return sealedToken, record.Keys, nil
 }
 

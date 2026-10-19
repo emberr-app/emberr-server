@@ -4,11 +4,15 @@ import (
 	"context"
 	"errors"
 	"log/slog"
+	"time"
 
 	"github.com/emberr-app/emberr-server/internal/store"
 )
 
-var ErrEmailAlreadyUsed = errors.New("email already belongs to another account")
+var (
+	ErrEmailAlreadyUsed = errors.New("email already belongs to another account")
+	ErrEmailCodeMissing = errors.New("email code missing")
+)
 
 type AccountDetails struct {
 	Email            string            `json:"email"`
@@ -21,6 +25,7 @@ type PasswordChange struct {
 	Keys               store.PasswordKeys
 	LogOutOtherDevices bool
 	CurrentToken       string
+	Code               string
 }
 
 func (accounts *Accounts) Details(ctx context.Context, accountID int64) (AccountDetails, error) {
@@ -32,17 +37,42 @@ func (accounts *Accounts) Details(ctx context.Context, accountID int64) (Account
 }
 
 func (accounts *Accounts) ChangePassword(ctx context.Context, accountID int64, change PasswordChange) error {
-	return accounts.accountTable.ChangePassword(ctx, store.PasswordChange{
-		AccountID:            accountID,
-		LoginKeyHash:         hashLoginKey(change.LoginKey),
-		Keys:                 change.Keys,
-		SignOutOtherSessions: change.LogOutOtherDevices,
-		CurrentTokenHash:     hashSessionToken(change.CurrentToken),
+	usesPasswordResetAllowance := change.Code == ""
+	if !usesPasswordResetAllowance {
+		_, email, err := accounts.findAccountWithEmail(ctx, accountID)
+		if err != nil {
+			return err
+		}
+		if err := accounts.emailCodes.Check(ctx, email, EmailCodeForPasswordChange, change.Code); err != nil {
+			return err
+		}
+	}
+
+	err := accounts.accountTable.ChangePassword(ctx, store.PasswordChange{
+		AccountID:                  accountID,
+		LoginKeyHash:               hashLoginKey(change.LoginKey),
+		Keys:                       change.Keys,
+		SignOutOtherSessions:       change.LogOutOtherDevices,
+		CurrentTokenHash:           hashSessionToken(change.CurrentToken),
+		UsesPasswordResetAllowance: usesPasswordResetAllowance,
+		ChangedAt:                  time.Now(),
 	})
+	if errors.Is(err, store.ErrNoPasswordResetAllowance) {
+		return ErrEmailCodeMissing
+	}
+	return err
 }
 
 func (accounts *Accounts) SendChangeEmailCode(ctx context.Context, newEmail string) error {
 	return accounts.emailCodes.Send(ctx, newEmail, EmailCodeForChangeEmail)
+}
+
+func (accounts *Accounts) SendPasswordChangeCode(ctx context.Context, accountID int64) error {
+	_, email, err := accounts.findAccountWithEmail(ctx, accountID)
+	if err != nil {
+		return err
+	}
+	return accounts.emailCodes.Send(ctx, email, EmailCodeForPasswordChange)
 }
 
 func (accounts *Accounts) SendDeletionCode(ctx context.Context, accountID int64) error {

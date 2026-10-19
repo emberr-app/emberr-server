@@ -13,6 +13,7 @@ type changePasswordRequest struct {
 	LoginKey           string             `json:"loginKey"`
 	Keys               store.PasswordKeys `json:"keys"`
 	LogOutOtherDevices *bool              `json:"logOutOtherDevices"`
+	Code               string             `json:"code"`
 }
 
 func handleChangePassword(accounts *auth.Accounts) http.HandlerFunc {
@@ -41,6 +42,7 @@ func handleChangePassword(accounts *auth.Accounts) http.HandlerFunc {
 			Keys:               request.Keys,
 			LogOutOtherDevices: logOutOtherDevices,
 			CurrentToken:       signedInToken(r),
+			Code:               request.Code,
 		})
 		if err != nil {
 			writeError(w, r, err)

@@ -83,6 +83,7 @@ func TestChangePasswordReplacesTheLoginKeyAndSignsOutOtherSessions(t *testing.T)
 	account := server.signUp(t)
 	otherToken := server.newSession(t, account)
 	change := newTestPasswordChange(nil)
+	change.Code = server.passwordChangeCode(t, account)
 
 	response := server.sendSignedIn(http.MethodPost, changePasswordPath, account.token, change)
 	if response.Code != http.StatusOK {
@@ -104,8 +105,10 @@ func TestChangePasswordKeepsOtherSessionsWhenAsked(t *testing.T) {
 	account := server.signUp(t)
 	otherToken := server.newSession(t, account)
 	logOutOtherDevices := false
+	change := newTestPasswordChange(&logOutOtherDevices)
+	change.Code = server.passwordChangeCode(t, account)
 
-	response := server.sendSignedIn(http.MethodPost, changePasswordPath, account.token, newTestPasswordChange(&logOutOtherDevices))
+	response := server.sendSignedIn(http.MethodPost, changePasswordPath, account.token, change)
 	if response.Code != http.StatusOK {
 		t.Fatalf("change password: status = %d %s, want 200", response.Code, response.Body)
 	}
@@ -113,6 +116,43 @@ func TestChangePasswordKeepsOtherSessionsWhenAsked(t *testing.T) {
 	if check := server.checkSession(otherToken); check.Code != http.StatusOK {
 		t.Fatalf("the other session was signed out although logOutOtherDevices was false: %d %s", check.Code, check.Body)
 	}
+}
+
+func TestChangePasswordNeedsTheRightPasswordCode(t *testing.T) {
+	server := newTestServer(t)
+	account := server.signUp(t)
+
+	missingCodeResponse := server.sendSignedIn(http.MethodPost, changePasswordPath, account.token, newTestPasswordChange(nil))
+	requireErrorCode(t, missingCodeResponse, http.StatusBadRequest, "BAD_REQUEST")
+
+	code := server.passwordChangeCode(t, account)
+	wrongCodeChange := newTestPasswordChange(nil)
+	wrongCodeChange.Code = wrongCode(code)
+	wrongCodeResponse := server.sendSignedIn(http.MethodPost, changePasswordPath, account.token, wrongCodeChange)
+	requireErrorCode(t, wrongCodeResponse, http.StatusUnauthorized, "INCORRECT_CODE")
+
+	rightCodeChange := newTestPasswordChange(nil)
+	rightCodeChange.Code = code
+	rightCodeResponse := server.sendSignedIn(http.MethodPost, changePasswordPath, account.token, rightCodeChange)
+	if rightCodeResponse.Code != http.StatusOK {
+		t.Fatalf("change password with the right code: status = %d %s, want 200", rightCodeResponse.Code, rightCodeResponse.Body)
+	}
+}
+
+func TestRecoveredSessionChangesThePasswordOnceWithoutACode(t *testing.T) {
+	server := newTestServer(t)
+	account, recoveredToken := server.signUpAndRecover(t)
+	loginToken := server.logIn(t, account).Token
+
+	loginSessionResponse := server.sendSignedIn(http.MethodPost, changePasswordPath, loginToken, newTestPasswordChange(nil))
+	requireErrorCode(t, loginSessionResponse, http.StatusBadRequest, "BAD_REQUEST")
+
+	firstResponse := server.sendSignedIn(http.MethodPost, changePasswordPath, recoveredToken, newTestPasswordChange(nil))
+	if firstResponse.Code != http.StatusOK {
+		t.Fatalf("first change without a code on the recovered session: status = %d %s, want 200", firstResponse.Code, firstResponse.Body)
+	}
+	secondResponse := server.sendSignedIn(http.MethodPost, changePasswordPath, recoveredToken, newTestPasswordChange(nil))
+	requireErrorCode(t, secondResponse, http.StatusBadRequest, "BAD_REQUEST")
 }
 
 func TestChangePasswordRefusesSettingsOverTheCaps(t *testing.T) {
@@ -283,18 +323,47 @@ func TestDeleteAccountRemovesItsRowsAndSignsOutEveryDevice(t *testing.T) {
 func (server testServer) newSession(t *testing.T, account testAccount) string {
 	t.Helper()
 
-	server.logIn(t, account)
-	response := server.send(http.MethodPost, verifyDevicePath, verifyDeviceRequest{
-		Email: account.email, LoginKey: account.loginKey, Code: server.latestCode(t, account.email), DeviceName: "Test laptop",
+	return server.logIn(t, account).Token
+}
+
+func (server testServer) passwordChangeCode(t *testing.T, account testAccount) string {
+	t.Helper()
+
+	server.requestAccountCode(t, account.token, auth.EmailCodeForPasswordChange, "")
+	return server.latestCode(t, account.email)
+}
+
+func (server testServer) signUpAndRecover(t *testing.T) (testAccount, string) {
+	t.Helper()
+
+	publicKey, privateKey, err := box.GenerateKey(rand.Reader)
+	if err != nil {
+		t.Fatalf("make a key pair: %v", err)
+	}
+	signup := newTestSignupRequest(randomTestEmail(), "")
+	signup.Keys.PublicKey = base64.StdEncoding.EncodeToString(publicKey[:])
+	account := server.signUpWith(t, signup)
+	server.requestRecoveryCode(t, account.email)
+
+	response := server.send(http.MethodPost, recoverPath, recoverRequest{
+		Email: account.email, Code: server.latestCode(t, account.email), DeviceName: "Recovered laptop",
 	})
 	if response.Code != http.StatusOK {
-		t.Fatalf("verify device: status = %d %s, want 200", response.Code, response.Body)
+		t.Fatalf("recover: status = %d %s, want 200", response.Code, response.Body)
 	}
-	var body verifyDeviceResponse
+	var body recoverResponse
 	if err := json.Unmarshal(response.Body.Bytes(), &body); err != nil {
-		t.Fatalf("read verify device answer: %v", err)
+		t.Fatalf("read recover answer: %v", err)
 	}
-	return body.Token
+	sealedToken, err := base64.StdEncoding.DecodeString(body.EncryptedToken)
+	if err != nil {
+		t.Fatalf("encryptedToken is not base64: %v", err)
+	}
+	tokenBytes, opened := box.OpenAnonymous(nil, sealedToken, publicKey, privateKey)
+	if !opened {
+		t.Fatal("the sealed token did not open with the account's private key")
+	}
+	return account, base64.URLEncoding.EncodeToString(tokenBytes)
 }
 
 func (server testServer) requestAccountCode(t *testing.T, token string, purpose auth.EmailCodePurpose, email string) {
