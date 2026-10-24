@@ -5,6 +5,7 @@ import (
 
 	"github.com/emberr-app/emberr-server/internal/auth"
 	"github.com/emberr-app/emberr-server/internal/store"
+	"github.com/emberr-app/emberr-server/internal/sync"
 )
 
 type Services struct {
@@ -13,6 +14,7 @@ type Services struct {
 	Accounts          *auth.Accounts
 	Sessions          *auth.Sessions
 	RateLimits        store.RateLimitTable
+	Spaces            *sync.Spaces
 	MinimumAppVersion AppVersion
 }
 
@@ -37,6 +39,11 @@ func NewRouter(services Services) http.Handler {
 	versionedRoutes.Handle("POST "+accountEmailCodePath, signedInAndLimited(accountEmailCodePath, handleAccountEmailCode(services.Accounts)))
 	versionedRoutes.Handle("POST "+changeEmailPath, signedInAndLimited(changeEmailPath, handleChangeEmail(services.Accounts)))
 	versionedRoutes.Handle("POST "+changePasswordPath, signedInAndLimited(changePasswordPath, handleChangePassword(services.Accounts)))
+	versionedRoutes.Handle("POST "+spacesPath, signedIn(handleRegisterSpace(services.Spaces)))
+	versionedRoutes.Handle("GET "+syncStatePath, signedIn(handleSyncState(services.Spaces)))
+	versionedRoutes.Handle("GET "+spaceChangesPath, signedIn(handleSpaceChanges(services.Spaces)))
+	versionedRoutes.Handle("PUT "+spaceItemPath, signedIn(handleCommitItem(services.Spaces)))
+	versionedRoutes.Handle("DELETE "+spaceItemPath, signedIn(handleDeleteItem(services.Spaces)))
 
 	mux := http.NewServeMux()
 	mux.HandleFunc("GET /health", handleHealth(services.Database))

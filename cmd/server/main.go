@@ -17,6 +17,7 @@ import (
 	"github.com/emberr-app/emberr-server/internal/auth"
 	"github.com/emberr-app/emberr-server/internal/email"
 	"github.com/emberr-app/emberr-server/internal/store"
+	"github.com/emberr-app/emberr-server/internal/sync"
 )
 
 const shutdownTimeout = 10 * time.Second
@@ -62,6 +63,7 @@ func run() error {
 		Accounts:          auth.NewAccounts(pool, emailCodes, emailProtector, settings.fakeSaltKey),
 		Sessions:          auth.NewSessions(pool),
 		RateLimits:        store.NewRateLimitTable(pool),
+		Spaces:            sync.NewSpaces(pool),
 		MinimumAppVersion: settings.minimumAppVersion,
 	})
 
