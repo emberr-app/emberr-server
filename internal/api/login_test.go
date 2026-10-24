@@ -21,6 +21,7 @@ import (
 
 	"github.com/emberr-app/emberr-server/internal/auth"
 	"github.com/emberr-app/emberr-server/internal/store"
+	"github.com/emberr-app/emberr-server/internal/sync"
 	"github.com/emberr-app/emberr-server/internal/testutil"
 )
 
@@ -235,6 +236,7 @@ func newTestServer(t *testing.T) testServer {
 		Accounts:   auth.NewAccounts(pool, emailCodes, emailProtector, [auth.FakeSaltKeyLength]byte{3}),
 		Sessions:   sessions,
 		RateLimits: store.NewRateLimitTable(pool),
+		Spaces:     sync.NewSpaces(pool),
 	})
 	return testServer{
 		router:         router,

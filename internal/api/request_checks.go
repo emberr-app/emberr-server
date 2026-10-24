@@ -4,6 +4,7 @@ import (
 	"encoding/base64"
 	"fmt"
 	"net/mail"
+	"regexp"
 	"strings"
 	"unicode/utf8"
 
@@ -14,6 +15,8 @@ const (
 	maxEmailLength      = 254
 	maxDeviceNameLength = 100
 )
+
+var syncIDPattern = regexp.MustCompile(`^[A-Za-z0-9_-]{1,128}$`)
 
 func checkEmail(rawEmail string) (string, error) {
 	email := auth.NormalizeEmail(rawEmail)
@@ -33,6 +36,13 @@ func checkDeviceName(deviceName string) error {
 	}
 	if utf8.RuneCountInString(deviceName) > maxDeviceNameLength {
 		return newBadRequestError(fmt.Sprintf("deviceName must be at most %d characters", maxDeviceNameLength))
+	}
+	return nil
+}
+
+func checkSyncID(fieldName string, id string) error {
+	if !syncIDPattern.MatchString(id) {
+		return newBadRequestError(fmt.Sprintf("%s must be 1 to 128 characters of A-Z, a-z, 0-9, _ and -", fieldName))
 	}
 	return nil
 }
