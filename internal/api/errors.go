@@ -47,6 +47,8 @@ var (
 	errPayloadTooLarge  = &apiError{Code: "REQUEST_TOO_LARGE", Message: "inlinePayload must be at most 1 MiB", statusCode: http.StatusRequestEntityTooLarge}
 	errBadSessionID     = newBadRequestError("id is not a session id")
 	errMissingEmailCode = newBadRequestError("code is missing")
+	errUnknownUpload    = newBadRequestError("objectKey was not handed out for this item or has expired, ask for a new upload URL")
+	errUploadSizeWrong  = newBadRequestError("the uploaded object is missing or its size is not sizeBytes")
 )
 
 func writeError(w http.ResponseWriter, r *http.Request, err error) {
@@ -90,6 +92,10 @@ func writeError(w http.ResponseWriter, r *http.Request, err error) {
 		responseError = errSpaceNotFound
 	case errors.Is(err, sync.ErrItemNotFound):
 		responseError = errItemNotFound
+	case errors.Is(err, sync.ErrUploadNotHandedOut):
+		responseError = errUnknownUpload
+	case errors.Is(err, sync.ErrUploadedSizeMismatched):
+		responseError = errUploadSizeWrong
 	default:
 		slog.ErrorContext(r.Context(), "request failed", "path", r.URL.Path, "error", err)
 		responseError = errInternal

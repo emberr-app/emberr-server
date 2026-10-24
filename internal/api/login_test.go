@@ -28,6 +28,7 @@ import (
 const (
 	testDeviceName                = "Test phone"
 	verificationCodeSubjectPrefix = "Verification code: "
+	testMaxItemBytes              = 1 << 20
 )
 
 type testServer struct {
@@ -36,6 +37,7 @@ type testServer struct {
 	emailProtector auth.EmailProtector
 	mailSender     *testutil.FakeMailSender
 	sessions       *auth.Sessions
+	blobStore      *testutil.FakeBlobStore
 }
 
 type testAccount struct {
@@ -230,13 +232,15 @@ func newTestServer(t *testing.T) testServer {
 	mailSender := &testutil.FakeMailSender{}
 	emailCodes := auth.NewEmailCodes(pool, mailSender, emailProtector)
 	sessions := auth.NewSessions(pool)
+	blobStore := &testutil.FakeBlobStore{}
 	router := NewRouter(Services{
-		Database:   pool,
-		EmailCodes: emailCodes,
-		Accounts:   auth.NewAccounts(pool, emailCodes, emailProtector, [auth.FakeSaltKeyLength]byte{3}),
-		Sessions:   sessions,
-		RateLimits: store.NewRateLimitTable(pool),
-		Spaces:     sync.NewSpaces(pool),
+		Database:     pool,
+		EmailCodes:   emailCodes,
+		Accounts:     auth.NewAccounts(pool, emailCodes, emailProtector, [auth.FakeSaltKeyLength]byte{3}),
+		Sessions:     sessions,
+		RateLimits:   store.NewRateLimitTable(pool),
+		Spaces:       sync.NewSpaces(pool, blobStore),
+		MaxItemBytes: testMaxItemBytes,
 	})
 	return testServer{
 		router:         router,
@@ -244,6 +248,7 @@ func newTestServer(t *testing.T) testServer {
 		emailProtector: emailProtector,
 		mailSender:     mailSender,
 		sessions:       sessions,
+		blobStore:      blobStore,
 	}
 }
 

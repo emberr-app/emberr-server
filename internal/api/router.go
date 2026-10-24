@@ -16,6 +16,7 @@ type Services struct {
 	RateLimits        store.RateLimitTable
 	Spaces            *sync.Spaces
 	MinimumAppVersion AppVersion
+	MaxItemBytes      int64
 }
 
 func NewRouter(services Services) http.Handler {
@@ -42,6 +43,7 @@ func NewRouter(services Services) http.Handler {
 	versionedRoutes.Handle("POST "+spacesPath, signedIn(handleRegisterSpace(services.Spaces)))
 	versionedRoutes.Handle("GET "+syncStatePath, signedIn(handleSyncState(services.Spaces)))
 	versionedRoutes.Handle("GET "+spaceChangesPath, signedIn(handleSpaceChanges(services.Spaces)))
+	versionedRoutes.Handle("POST "+uploadURLsPath, signedIn(handleCreateUploadURL(services.Spaces, services.MaxItemBytes)))
 	versionedRoutes.Handle("PUT "+spaceItemPath, signedIn(handleCommitItem(services.Spaces)))
 	versionedRoutes.Handle("DELETE "+spaceItemPath, signedIn(handleDeleteItem(services.Spaces)))
 

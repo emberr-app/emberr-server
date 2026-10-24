@@ -244,7 +244,43 @@ func (table AccountTable) UpdateEmail(ctx context.Context, accountID int64, emai
 }
 
 func (table AccountTable) Delete(ctx context.Context, accountID int64) error {
-	_, err := table.pool.Exec(ctx, `DELETE FROM accounts WHERE account_id = $1`, accountID)
+	err := pgx.BeginFunc(ctx, table.pool, func(tx pgx.Tx) error {
+		_, err := tx.Exec(ctx, `SELECT space_ref FROM spaces WHERE owner_account_id = $1 ORDER BY space_ref FOR UPDATE`, accountID)
+		if err != nil {
+			return fmt.Errorf("lock spaces: %w", err)
+		}
+
+		_, err = tx.Exec(ctx,
+			`WITH removed_uploads AS (
+				DELETE FROM pending_uploads WHERE account_id = $1 RETURNING object_key
+			)
+			INSERT INTO object_deletions (object_key, delete_after)
+			SELECT object_key, now_utc_micro_seconds() FROM removed_uploads
+			ON CONFLICT (object_key) DO NOTHING`,
+			accountID,
+		)
+		if err != nil {
+			return fmt.Errorf("queue pending upload deletions: %w", err)
+		}
+
+		_, err = tx.Exec(ctx,
+			`INSERT INTO object_deletions (object_key, delete_after)
+			SELECT items.blob_object_key, now_utc_micro_seconds()
+			FROM items JOIN spaces ON spaces.space_ref = items.space_ref
+			WHERE spaces.owner_account_id = $1 AND items.blob_object_key IS NOT NULL
+			ON CONFLICT (object_key) DO NOTHING`,
+			accountID,
+		)
+		if err != nil {
+			return fmt.Errorf("queue item blob deletions: %w", err)
+		}
+
+		_, err = tx.Exec(ctx, `DELETE FROM accounts WHERE account_id = $1`, accountID)
+		if err != nil {
+			return fmt.Errorf("delete account row: %w", err)
+		}
+		return nil
+	})
 	if err != nil {
 		return fmt.Errorf("delete account: %w", err)
 	}

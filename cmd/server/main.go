@@ -15,6 +15,7 @@ import (
 
 	"github.com/emberr-app/emberr-server/internal/api"
 	"github.com/emberr-app/emberr-server/internal/auth"
+	"github.com/emberr-app/emberr-server/internal/blob"
 	"github.com/emberr-app/emberr-server/internal/email"
 	"github.com/emberr-app/emberr-server/internal/store"
 	"github.com/emberr-app/emberr-server/internal/sync"
@@ -63,8 +64,9 @@ func run() error {
 		Accounts:          auth.NewAccounts(pool, emailCodes, emailProtector, settings.fakeSaltKey),
 		Sessions:          auth.NewSessions(pool),
 		RateLimits:        store.NewRateLimitTable(pool),
-		Spaces:            sync.NewSpaces(pool),
+		Spaces:            sync.NewSpaces(pool, blob.NewS3Store(settings.s3)),
 		MinimumAppVersion: settings.minimumAppVersion,
+		MaxItemBytes:      settings.maxItemBytes,
 	})
 
 	server := &http.Server{

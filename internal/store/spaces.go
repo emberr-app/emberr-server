@@ -44,6 +44,9 @@ type Item struct {
 	EncryptedKeyNonce  *string `json:"encryptedKeyNonce"`
 	InlinePayload      *string `json:"inlinePayload"`
 	InlinePayloadNonce *string `json:"inlinePayloadNonce"`
+	BlobObjectKey      *string `json:"-"`
+	BlobNonce          *string `json:"blobNonce"`
+	DownloadURL        *string `json:"downloadUrl"`
 	Revision           int64   `json:"revision"`
 	SizeBytes          int64   `json:"sizeBytes"`
 	Deleted            bool    `json:"deleted"`
@@ -61,7 +64,7 @@ const spaceColumns = `space_ref, client_space_id, kind, latest_revision, encrypt
 
 const itemColumns = `item_id, item_type, payload_version, parent_id,
 	encrypted_key, encrypted_key_nonce, inline_payload, inline_payload_nonce,
-	revision, size_bytes, deleted, updated_at`
+	blob_object_key, blob_nonce, revision, size_bytes, deleted, updated_at`
 
 func spaceScanTargets(space *Space) []any {
 	return []any{&space.SpaceRef, &space.ClientSpaceID, &space.Kind, &space.LatestRevision, &space.EncryptedKey, &space.EncryptedKeyNonce}
@@ -71,7 +74,7 @@ func itemScanTargets(item *Item) []any {
 	return []any{
 		&item.ItemID, &item.ItemType, &item.PayloadVersion, &item.ParentID,
 		&item.EncryptedKey, &item.EncryptedKeyNonce, &item.InlinePayload, &item.InlinePayloadNonce,
-		&item.Revision, &item.SizeBytes, &item.Deleted, &item.UpdatedAt,
+		&item.BlobObjectKey, &item.BlobNonce, &item.Revision, &item.SizeBytes, &item.Deleted, &item.UpdatedAt,
 	}
 }
 
@@ -201,8 +204,8 @@ func (space LockedSpace) SaveItemAsNextRevision(ctx context.Context, item Item, 
 		`INSERT INTO items (
 			space_ref, item_id, item_type, payload_version, parent_id,
 			encrypted_key, encrypted_key_nonce, inline_payload, inline_payload_nonce,
-			revision, size_bytes, deleted, updated_at
-		) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, now_utc_micro_seconds())
+			blob_object_key, blob_nonce, revision, size_bytes, deleted, updated_at
+		) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, now_utc_micro_seconds())
 		ON CONFLICT (space_ref, item_id) DO UPDATE SET
 			item_type = EXCLUDED.item_type,
 			payload_version = EXCLUDED.payload_version,
@@ -211,13 +214,15 @@ func (space LockedSpace) SaveItemAsNextRevision(ctx context.Context, item Item, 
 			encrypted_key_nonce = EXCLUDED.encrypted_key_nonce,
 			inline_payload = EXCLUDED.inline_payload,
 			inline_payload_nonce = EXCLUDED.inline_payload_nonce,
+			blob_object_key = EXCLUDED.blob_object_key,
+			blob_nonce = EXCLUDED.blob_nonce,
 			revision = EXCLUDED.revision,
 			size_bytes = EXCLUDED.size_bytes,
 			deleted = EXCLUDED.deleted,
 			updated_at = EXCLUDED.updated_at`,
 		space.spaceRef, item.ItemID, item.ItemType, item.PayloadVersion, item.ParentID,
 		item.EncryptedKey, item.EncryptedKeyNonce, item.InlinePayload, item.InlinePayloadNonce,
-		nextRevision, item.SizeBytes, item.Deleted,
+		item.BlobObjectKey, item.BlobNonce, nextRevision, item.SizeBytes, item.Deleted,
 	)
 	if err != nil {
 		return 0, fmt.Errorf("save item: %w", err)
