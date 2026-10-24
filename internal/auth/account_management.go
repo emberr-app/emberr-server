@@ -126,6 +126,21 @@ func (accounts *Accounts) Delete(ctx context.Context, accountID int64, loginKey 
 	return accounts.accountTable.Delete(ctx, accountID)
 }
 
+func (accounts *Accounts) EraseAllData(ctx context.Context, accountID int64, loginKey []byte) error {
+	account, _, err := accounts.findAccountWithEmail(ctx, accountID)
+	if err != nil {
+		return err
+	}
+	matches, err := loginKeyMatchesHash(loginKey, account.LoginKeyHash)
+	if err != nil {
+		return err
+	}
+	if !matches {
+		return ErrWrongLoginKey
+	}
+	return accounts.accountTable.EraseAllData(ctx, accountID)
+}
+
 func (accounts *Accounts) findAccountWithEmail(ctx context.Context, accountID int64) (store.Account, string, error) {
 	account, found, err := accounts.accountTable.Find(ctx, accountID)
 	if err != nil {

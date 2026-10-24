@@ -245,37 +245,11 @@ func (table AccountTable) UpdateEmail(ctx context.Context, accountID int64, emai
 
 func (table AccountTable) Delete(ctx context.Context, accountID int64) error {
 	err := pgx.BeginFunc(ctx, table.pool, func(tx pgx.Tx) error {
-		_, err := tx.Exec(ctx, `SELECT space_ref FROM spaces WHERE owner_account_id = $1 ORDER BY space_ref FOR UPDATE`, accountID)
-		if err != nil {
-			return fmt.Errorf("lock spaces: %w", err)
+		if err := lockSpacesAndQueueEveryBlobForDeletionNow(ctx, tx, accountID); err != nil {
+			return err
 		}
 
-		_, err = tx.Exec(ctx,
-			`WITH removed_uploads AS (
-				DELETE FROM pending_uploads WHERE account_id = $1 RETURNING object_key
-			)
-			INSERT INTO object_deletions (object_key, delete_after)
-			SELECT object_key, now_utc_micro_seconds() FROM removed_uploads
-			ON CONFLICT (object_key) DO NOTHING`,
-			accountID,
-		)
-		if err != nil {
-			return fmt.Errorf("queue pending upload deletions: %w", err)
-		}
-
-		_, err = tx.Exec(ctx,
-			`INSERT INTO object_deletions (object_key, delete_after)
-			SELECT items.blob_object_key, now_utc_micro_seconds()
-			FROM items JOIN spaces ON spaces.space_ref = items.space_ref
-			WHERE spaces.owner_account_id = $1 AND items.blob_object_key IS NOT NULL
-			ON CONFLICT (object_key) DO NOTHING`,
-			accountID,
-		)
-		if err != nil {
-			return fmt.Errorf("queue item blob deletions: %w", err)
-		}
-
-		_, err = tx.Exec(ctx, `DELETE FROM accounts WHERE account_id = $1`, accountID)
+		_, err := tx.Exec(ctx, `DELETE FROM accounts WHERE account_id = $1`, accountID)
 		if err != nil {
 			return fmt.Errorf("delete account row: %w", err)
 		}
@@ -283,6 +257,93 @@ func (table AccountTable) Delete(ctx context.Context, accountID int64) error {
 	})
 	if err != nil {
 		return fmt.Errorf("delete account: %w", err)
+	}
+	return nil
+}
+
+func (table AccountTable) EraseAllData(ctx context.Context, accountID int64) error {
+	err := pgx.BeginFunc(ctx, table.pool, func(tx pgx.Tx) error {
+		if err := lockSpacesAndQueueEveryBlobForDeletionNow(ctx, tx, accountID); err != nil {
+			return err
+		}
+
+		_, err := tx.Exec(ctx,
+			`WITH numbered_live_items AS (
+				SELECT items.space_ref, items.item_id,
+					spaces.latest_revision + row_number() OVER (PARTITION BY items.space_ref ORDER BY items.item_id) AS tombstone_revision
+				FROM items JOIN spaces ON spaces.space_ref = items.space_ref
+				WHERE spaces.owner_account_id = $1 AND items.deleted = FALSE
+			),
+			erased_items AS (
+				UPDATE items SET
+					deleted = TRUE,
+					parent_id = NULL,
+					encrypted_key = NULL,
+					encrypted_key_nonce = NULL,
+					inline_payload = NULL,
+					inline_payload_nonce = NULL,
+					blob_object_key = NULL,
+					blob_nonce = NULL,
+					size_bytes = 0,
+					revision = numbered_live_items.tombstone_revision,
+					updated_at = now_utc_micro_seconds()
+				FROM numbered_live_items
+				WHERE items.space_ref = numbered_live_items.space_ref AND items.item_id = numbered_live_items.item_id
+				RETURNING items.space_ref
+			),
+			erased_counts AS (
+				SELECT space_ref, count(*) AS erased_count FROM erased_items GROUP BY space_ref
+			)
+			UPDATE spaces SET latest_revision = spaces.latest_revision + erased_counts.erased_count
+			FROM erased_counts
+			WHERE spaces.space_ref = erased_counts.space_ref`,
+			accountID,
+		)
+		if err != nil {
+			return fmt.Errorf("turn items into tombstones: %w", err)
+		}
+
+		_, err = tx.Exec(ctx, `UPDATE accounts SET storage_used_bytes = 0 WHERE account_id = $1`, accountID)
+		if err != nil {
+			return fmt.Errorf("reset storage used: %w", err)
+		}
+		return nil
+	})
+	if err != nil {
+		return fmt.Errorf("erase account data: %w", err)
+	}
+	return nil
+}
+
+func lockSpacesAndQueueEveryBlobForDeletionNow(ctx context.Context, tx pgx.Tx, accountID int64) error {
+	_, err := tx.Exec(ctx, `SELECT space_ref FROM spaces WHERE owner_account_id = $1 ORDER BY space_ref FOR UPDATE`, accountID)
+	if err != nil {
+		return fmt.Errorf("lock spaces: %w", err)
+	}
+
+	_, err = tx.Exec(ctx,
+		`WITH removed_uploads AS (
+			DELETE FROM pending_uploads WHERE account_id = $1 RETURNING object_key
+		)
+		INSERT INTO object_deletions (object_key, delete_after)
+		SELECT object_key, now_utc_micro_seconds() FROM removed_uploads
+		ON CONFLICT (object_key) DO NOTHING`,
+		accountID,
+	)
+	if err != nil {
+		return fmt.Errorf("queue pending upload deletions: %w", err)
+	}
+
+	_, err = tx.Exec(ctx,
+		`INSERT INTO object_deletions (object_key, delete_after)
+		SELECT items.blob_object_key, now_utc_micro_seconds()
+		FROM items JOIN spaces ON spaces.space_ref = items.space_ref
+		WHERE spaces.owner_account_id = $1 AND items.blob_object_key IS NOT NULL
+		ON CONFLICT (object_key) DO NOTHING`,
+		accountID,
+	)
+	if err != nil {
+		return fmt.Errorf("queue item blob deletions: %w", err)
 	}
 	return nil
 }
