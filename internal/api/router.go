@@ -37,6 +37,7 @@ func NewRouter(services Services) http.Handler {
 	versionedRoutes.Handle("DELETE "+sessionsPath+"/{id}", signedIn(handleSignOutSession(services.Sessions)))
 	versionedRoutes.Handle("GET "+accountPath, signedIn(handleAccountDetails(services.Accounts)))
 	versionedRoutes.Handle("DELETE "+accountPath, signedInAndLimited(accountPath, handleDeleteAccount(services.Accounts)))
+	versionedRoutes.Handle("POST "+eraseAccountPath, signedInAndLimited(eraseAccountPath, handleEraseAccountData(services.Accounts)))
 	versionedRoutes.Handle("POST "+accountEmailCodePath, signedInAndLimited(accountEmailCodePath, handleAccountEmailCode(services.Accounts)))
 	versionedRoutes.Handle("POST "+changeEmailPath, signedInAndLimited(changeEmailPath, handleChangeEmail(services.Accounts)))
 	versionedRoutes.Handle("POST "+changePasswordPath, signedInAndLimited(changePasswordPath, handleChangePassword(services.Accounts)))
