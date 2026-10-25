@@ -240,6 +240,7 @@ func newTestServer(t *testing.T) testServer {
 		Sessions:     sessions,
 		RateLimits:   store.NewRateLimitTable(pool),
 		Spaces:       sync.NewSpaces(pool, blobStore),
+		Media:        sync.NewMedia(pool, blobStore),
 		MaxItemBytes: testMaxItemBytes,
 	})
 	return testServer{

@@ -18,7 +18,7 @@ import (
 
 const testMigrationsFolder = "../../migrations"
 
-var accountTableNames = []string{"account_keys", "accounts", "email_codes", "items", "object_deletions", "pending_uploads", "rate_limits", "sessions", "spaces"}
+var accountTableNames = []string{"account_keys", "accounts", "email_codes", "items", "media_files", "object_deletions", "pending_uploads", "rate_limits", "sessions", "spaces"}
 
 func TestMigrationsCreateAndDropAccountTables(t *testing.T) {
 	pool := testutil.OpenThrowawayDatabase(t)

@@ -15,6 +15,7 @@ type Services struct {
 	Sessions          *auth.Sessions
 	RateLimits        store.RateLimitTable
 	Spaces            *sync.Spaces
+	Media             *sync.Media
 	MinimumAppVersion AppVersion
 	MaxItemBytes      int64
 }
@@ -47,6 +48,8 @@ func NewRouter(services Services) http.Handler {
 	versionedRoutes.Handle("POST "+uploadURLsPath, signedIn(handleCreateUploadURL(services.Spaces, services.MaxItemBytes)))
 	versionedRoutes.Handle("PUT "+spaceItemPath, signedIn(handleCommitItem(services.Spaces)))
 	versionedRoutes.Handle("DELETE "+spaceItemPath, signedIn(handleDeleteItem(services.Spaces)))
+	versionedRoutes.Handle("POST "+mediaUploadURLsPath, signedIn(handleCreateMediaUploadURLs(services.Media)))
+	versionedRoutes.Handle("PUT "+mediaPath, signedIn(handleCommitMedia(services.Media)))
 
 	mux := http.NewServeMux()
 	mux.HandleFunc("GET /health", handleHealth(services.Database))

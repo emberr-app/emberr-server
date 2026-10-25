@@ -3,10 +3,12 @@ package api
 import (
 	"encoding/json"
 	"errors"
+	"fmt"
 	"log/slog"
 	"net/http"
 
 	"github.com/emberr-app/emberr-server/internal/auth"
+	"github.com/emberr-app/emberr-server/internal/blob"
 	"github.com/emberr-app/emberr-server/internal/store"
 	"github.com/emberr-app/emberr-server/internal/sync"
 )
@@ -44,11 +46,14 @@ var (
 	errEmailAlreadyUsed = &apiError{Code: "EMAIL_ALREADY_USED", Message: "another account already uses this email", statusCode: http.StatusForbidden}
 	errSpaceNotFound    = &apiError{Code: "NOT_FOUND", Message: "no such space on this account", statusCode: http.StatusNotFound}
 	errItemNotFound     = &apiError{Code: "NOT_FOUND", Message: "no such item in this space", statusCode: http.StatusNotFound}
+	errMediaNotFound    = &apiError{Code: "NOT_FOUND", Message: "no such media file on this account", statusCode: http.StatusNotFound}
+	errMediaTooLarge    = &apiError{Code: "REQUEST_TOO_LARGE", Message: fmt.Sprintf("a media file must be at most %d bytes", sync.MaxMediaBytes), statusCode: http.StatusRequestEntityTooLarge}
 	errPayloadTooLarge  = &apiError{Code: "REQUEST_TOO_LARGE", Message: "inlinePayload must be at most 1 MiB", statusCode: http.StatusRequestEntityTooLarge}
 	errBadSessionID     = newBadRequestError("id is not a session id")
 	errMissingEmailCode = newBadRequestError("code is missing")
 	errUnknownUpload    = newBadRequestError("objectKey was not handed out for this item or has expired, ask for a new upload URL")
 	errUploadSizeWrong  = newBadRequestError("the uploaded object is missing or its size is not sizeBytes")
+	errMediaIncomplete  = newBadRequestError("some pieces are missing or have another size, or the upload started over, ask for upload URLs again")
 )
 
 func writeError(w http.ResponseWriter, r *http.Request, err error) {
@@ -96,8 +101,14 @@ func writeError(w http.ResponseWriter, r *http.Request, err error) {
 		responseError = errUnknownUpload
 	case errors.Is(err, sync.ErrUploadedSizeMismatched):
 		responseError = errUploadSizeWrong
+	case errors.Is(err, sync.ErrMediaNotFound):
+		responseError = errMediaNotFound
+	case errors.Is(err, sync.ErrMediaTooLarge):
+		responseError = errMediaTooLarge
+	case errors.Is(err, sync.ErrMediaUploadIncomplete):
+		responseError = errMediaIncomplete
 	default:
-		slog.ErrorContext(r.Context(), "request failed", "path", r.URL.Path, "error", err)
+		slog.ErrorContext(r.Context(), "request failed", "route", r.Pattern, "error", blob.WithoutRequestURL(err))
 		responseError = errInternal
 	}
 

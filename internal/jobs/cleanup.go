@@ -2,21 +2,21 @@ package jobs
 
 import (
 	"context"
-	"errors"
 	"fmt"
 	"log/slog"
-	"net/url"
 
 	"github.com/jackc/pgx/v5/pgxpool"
 
 	"github.com/emberr-app/emberr-server/internal/blob"
 	"github.com/emberr-app/emberr-server/internal/store"
+	"github.com/emberr-app/emberr-server/internal/sync"
 )
 
 const cleanupBatchSize = 1000
 
 type Cleanup struct {
 	spaceTable     store.SpaceTable
+	mediaTable     store.MediaTable
 	emailCodeTable store.EmailCodeTable
 	rateLimitTable store.RateLimitTable
 	blobStore      blob.Store
@@ -25,6 +25,7 @@ type Cleanup struct {
 func NewCleanup(pool *pgxpool.Pool, blobStore blob.Store) *Cleanup {
 	return &Cleanup{
 		spaceTable:     store.NewSpaceTable(pool),
+		mediaTable:     store.NewMediaTable(pool),
 		emailCodeTable: store.NewEmailCodeTable(pool),
 		rateLimitTable: store.NewRateLimitTable(pool),
 		blobStore:      blobStore,
@@ -65,7 +66,7 @@ func (cleanup *Cleanup) DeleteDueObjects(ctx context.Context) error {
 		slog.Info("deleted queued objects", "deleted", deletedCount)
 	}
 	if failedCount > 0 {
-		slog.Error("could not delete some queued objects, they stay queued", "failed", failedCount, "error", withoutRequestURL(lastFailure))
+		slog.Error("could not delete some queued objects, they stay queued", "failed", failedCount, "error", blob.WithoutRequestURL(lastFailure))
 	}
 	return nil
 }
@@ -89,6 +90,25 @@ func (cleanup *Cleanup) QueueExpiredPendingUploads(ctx context.Context) error {
 	return nil
 }
 
+func (cleanup *Cleanup) QueueExpiredMediaUploads(ctx context.Context) error {
+	var totalRemoved int64
+	for {
+		removedCount, err := cleanup.mediaTable.QueueExpiredUnfinishedUploadsForDeletion(ctx, cleanupBatchSize, sync.AbandonedMediaPieceDeletionDelay)
+		if err != nil {
+			return err
+		}
+		totalRemoved += removedCount
+		if removedCount < cleanupBatchSize {
+			break
+		}
+	}
+
+	if totalRemoved > 0 {
+		slog.Info("queued expired media uploads for deletion", "uploads", totalRemoved)
+	}
+	return nil
+}
+
 func (cleanup *Cleanup) RemoveExpiredCodesAndRateLimits(ctx context.Context) error {
 	deletedCodes, err := cleanup.emailCodeTable.DeleteExpired(ctx)
 	if err != nil {
@@ -103,12 +123,4 @@ func (cleanup *Cleanup) RemoveExpiredCodesAndRateLimits(ctx context.Context) err
 		slog.Info("removed expired email codes and rate limits", "emailCodes", deletedCodes, "rateLimits", deletedRateLimits)
 	}
 	return nil
-}
-
-func withoutRequestURL(err error) error {
-	var requestError *url.Error
-	if errors.As(err, &requestError) {
-		return fmt.Errorf("%s request failed: %w", requestError.Op, requestError.Err)
-	}
-	return err
 }

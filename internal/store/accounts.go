@@ -335,6 +335,20 @@ func lockSpacesAndQueueEveryBlobForDeletionNow(ctx context.Context, tx pgx.Tx, a
 	}
 
 	_, err = tx.Exec(ctx,
+		`WITH removed_media AS (
+			DELETE FROM media_files WHERE account_id = $1 RETURNING media_id, upload_id, piece_sizes
+		)
+		INSERT INTO object_deletions (object_key, delete_after)
+		SELECT `+mediaPieceKeyColumn+`, now_utc_micro_seconds()
+		FROM removed_media AS media, `+everyMediaPiece+`
+		ON CONFLICT (object_key) DO NOTHING`,
+		accountID,
+	)
+	if err != nil {
+		return fmt.Errorf("queue media piece deletions: %w", err)
+	}
+
+	_, err = tx.Exec(ctx,
 		`INSERT INTO object_deletions (object_key, delete_after)
 		SELECT items.blob_object_key, now_utc_micro_seconds()
 		FROM items JOIN spaces ON spaces.space_ref = items.space_ref
