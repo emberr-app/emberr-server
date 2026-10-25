@@ -47,6 +47,9 @@ var (
 	errSpaceNotFound    = &apiError{Code: "NOT_FOUND", Message: "no such space on this account", statusCode: http.StatusNotFound}
 	errItemNotFound     = &apiError{Code: "NOT_FOUND", Message: "no such item in this space", statusCode: http.StatusNotFound}
 	errMediaNotFound    = &apiError{Code: "NOT_FOUND", Message: "no such media file on this account", statusCode: http.StatusNotFound}
+	errNoteNotFound     = &apiError{Code: "NOT_FOUND", Message: "no such live NOTE or DAILY item in this space", statusCode: http.StatusNotFound}
+	errNoCommittedMedia = &apiError{Code: "NOT_FOUND", Message: "no committed media file with this id on this account", statusCode: http.StatusNotFound}
+	errMediaLockMissing = &apiError{Code: "NOT_FOUND", Message: "no such media lock in this space", statusCode: http.StatusNotFound}
 	errMediaTooLarge    = &apiError{Code: "REQUEST_TOO_LARGE", Message: fmt.Sprintf("a media file must be at most %d bytes", sync.MaxMediaBytes), statusCode: http.StatusRequestEntityTooLarge}
 	errPayloadTooLarge  = &apiError{Code: "REQUEST_TOO_LARGE", Message: "inlinePayload must be at most 1 MiB", statusCode: http.StatusRequestEntityTooLarge}
 	errBadSessionID     = newBadRequestError("id is not a session id")
@@ -107,6 +110,12 @@ func writeError(w http.ResponseWriter, r *http.Request, err error) {
 		responseError = errMediaTooLarge
 	case errors.Is(err, sync.ErrMediaUploadIncomplete):
 		responseError = errMediaIncomplete
+	case errors.Is(err, sync.ErrNoteNotFound):
+		responseError = errNoteNotFound
+	case errors.Is(err, sync.ErrCommittedMediaNotFound):
+		responseError = errNoCommittedMedia
+	case errors.Is(err, sync.ErrMediaLockNotFound):
+		responseError = errMediaLockMissing
 	default:
 		slog.ErrorContext(r.Context(), "request failed", "route", r.Pattern, "error", blob.WithoutRequestURL(err))
 		responseError = errInternal

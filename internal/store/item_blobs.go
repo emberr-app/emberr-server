@@ -45,7 +45,7 @@ func (table SpaceTable) FindPendingUpload(ctx context.Context, objectKey string)
 	return upload, true, nil
 }
 
-func (space LockedSpace) TakePendingUpload(ctx context.Context, objectKey string, itemID string, sizeBytes int64) (bool, error) {
+func (space *LockedSpace) TakePendingUpload(ctx context.Context, objectKey string, itemID string, sizeBytes int64) (bool, error) {
 	var takenObjectKey string
 	err := space.tx.QueryRow(ctx,
 		`DELETE FROM pending_uploads
@@ -63,7 +63,7 @@ func (space LockedSpace) TakePendingUpload(ctx context.Context, objectKey string
 	return true, nil
 }
 
-func (space LockedSpace) QueueObjectDeletion(ctx context.Context, objectKey string, delay time.Duration) error {
+func (space *LockedSpace) QueueObjectDeletion(ctx context.Context, objectKey string, delay time.Duration) error {
 	_, err := space.tx.Exec(ctx,
 		`INSERT INTO object_deletions (object_key, delete_after) VALUES ($1, now_utc_micro_seconds() + $2)
 		ON CONFLICT (object_key) DO NOTHING`,

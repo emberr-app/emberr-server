@@ -119,6 +119,46 @@ func TestExpiredUnfinishedMediaUploadIsQueuedWhileUnexpiredAndCommittedFilesStay
 	}
 }
 
+func TestMediaFileUnusedForOverEightDaysIsRemovedWhileARecentlyUnusedOneStays(t *testing.T) {
+	cleanup, pool, _ := newTestCleanup(t)
+	accountID := addTestAccount(t, pool)
+	addMediaFile(t, pool, accountID, "media_long_unused", time.Now(), true)
+	addMediaFile(t, pool, accountID, "media_recently_unused", time.Now(), true)
+	markMediaFileUnusedSince(t, pool, "media_long_unused", time.Now().Add(-sync.UnusedMediaDeletionDelay-time.Hour))
+	markMediaFileUnusedSince(t, pool, "media_recently_unused", time.Now().Add(-sync.UnusedMediaDeletionDelay+time.Hour))
+	storageBeforeRun := 4 * testObjectBytes
+	if _, err := pool.Exec(t.Context(), `UPDATE accounts SET storage_used_bytes = $2 WHERE account_id = $1`, accountID, storageBeforeRun); err != nil {
+		t.Fatalf("set storage used: %v", err)
+	}
+
+	if err := cleanup.QueueUnusedMediaFiles(t.Context()); err != nil {
+		t.Fatal(err)
+	}
+
+	if hasMediaFile(t, pool, "media_long_unused") {
+		t.Error("the file unused for over 8 days is still there")
+	}
+	for pieceIndex := range 2 {
+		pieceKey := store.MediaPieceKey("media_long_unused", testMediaUploadID, pieceIndex)
+		if deleteAfter, queued := deletionTimeOf(t, pool, pieceKey); !queued || deleteAfter > time.Now().UnixMicro() {
+			t.Errorf("piece %s: queued = %v, delete after %d; want queued and ready now", pieceKey, queued, deleteAfter)
+		}
+	}
+	if !hasMediaFile(t, pool, "media_recently_unused") {
+		t.Error("the recently unused file was removed")
+	}
+	if _, queued := deletionTimeOf(t, pool, store.MediaPieceKey("media_recently_unused", testMediaUploadID, 0)); queued {
+		t.Error("a piece of the recently unused file was queued for deletion")
+	}
+	var storageUsed int64
+	if err := pool.QueryRow(t.Context(), `SELECT storage_used_bytes FROM accounts WHERE account_id = $1`, accountID).Scan(&storageUsed); err != nil {
+		t.Fatalf("load storage used: %v", err)
+	}
+	if wantStorage := int64(storageBeforeRun - 2*testObjectBytes); storageUsed != wantStorage {
+		t.Errorf("storage used = %d, want %d", storageUsed, wantStorage)
+	}
+}
+
 func newTestCleanup(t *testing.T) (*Cleanup, *pgxpool.Pool, *testutil.FakeBlobStore) {
 	t.Helper()
 
@@ -220,4 +260,12 @@ func hasMediaFile(t *testing.T, pool *pgxpool.Pool, mediaID string) bool {
 		t.Fatalf("count media files: %v", err)
 	}
 	return mediaCount > 0
+}
+
+func markMediaFileUnusedSince(t *testing.T, pool *pgxpool.Pool, mediaID string, unusedSince time.Time) {
+	t.Helper()
+
+	if _, err := pool.Exec(t.Context(), `UPDATE media_files SET unused_since = $2 WHERE media_id = $1`, mediaID, unusedSince.UnixMicro()); err != nil {
+		t.Fatalf("mark media file unused: %v", err)
+	}
 }

@@ -18,6 +18,7 @@ const (
 	MaxMediaBytes                    = 10 << 30
 	unfinishedMediaUploadLifetime    = 14 * 24 * time.Hour
 	AbandonedMediaPieceDeletionDelay = 2 * blob.SignedURLLifetime
+	UnusedMediaDeletionDelay         = 24*time.Hour + 7*24*time.Hour
 )
 
 var (
@@ -34,6 +35,17 @@ type MediaPieceUploadURL struct {
 type MediaUploadURLs struct {
 	Committed bool
 	Pieces    []MediaPieceUploadURL
+	ExpiresAt int64
+}
+
+type MediaPieceDownloadURL struct {
+	Index       int    `json:"index"`
+	DownloadURL string `json:"downloadUrl"`
+	SizeBytes   int64  `json:"sizeBytes"`
+}
+
+type MediaDownloadURLs struct {
+	Pieces    []MediaPieceDownloadURL
 	ExpiresAt int64
 }
 
@@ -133,6 +145,27 @@ func (media *Media) Commit(ctx context.Context, accountID int64, mediaID string)
 		return 0, ErrMediaUploadIncomplete
 	}
 	return committedSize, nil
+}
+
+func (media *Media) CreateDownloadURLs(ctx context.Context, accountID int64, mediaID string) (MediaDownloadURLs, error) {
+	file, found, err := media.mediaTable.Find(ctx, accountID, mediaID)
+	if err != nil {
+		return MediaDownloadURLs{}, err
+	}
+	if !found || !file.Committed {
+		return MediaDownloadURLs{}, ErrCommittedMediaNotFound
+	}
+
+	signedAt := time.Now()
+	pieces := make([]MediaPieceDownloadURL, 0, len(file.Upload.PieceSizes))
+	for pieceIndex, pieceSize := range file.Upload.PieceSizes {
+		downloadURL, err := media.blobStore.SignedDownloadURL(ctx, store.MediaPieceKey(mediaID, file.Upload.UploadID, pieceIndex))
+		if err != nil {
+			return MediaDownloadURLs{}, err
+		}
+		pieces = append(pieces, MediaPieceDownloadURL{Index: pieceIndex, DownloadURL: downloadURL, SizeBytes: pieceSize})
+	}
+	return MediaDownloadURLs{Pieces: pieces, ExpiresAt: signedAt.Add(blob.SignedURLLifetime).UnixMicro()}, nil
 }
 
 func (media *Media) checkEveryPieceUploaded(ctx context.Context, mediaID string, upload store.MediaUpload) error {

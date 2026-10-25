@@ -29,6 +29,7 @@ func StartScheduler(ctx context.Context, cleanup *Cleanup) (*Scheduler, error) {
 		{name: "delete due objects", schedule: "@every 8m", run: cleanup.DeleteDueObjects},
 		{name: "queue expired pending uploads", schedule: "@every 5m", run: cleanup.QueueExpiredPendingUploads},
 		{name: "queue expired media uploads", schedule: "@every 5m", run: cleanup.QueueExpiredMediaUploads},
+		{name: "queue unused media files", schedule: "@every 1h", run: cleanup.QueueUnusedMediaFiles},
 		{name: "remove expired codes and rate limits", schedule: "@every 1m", run: cleanup.RemoveExpiredCodesAndRateLimits},
 	}
 	for _, job := range scheduledJobs {
