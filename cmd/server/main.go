@@ -67,6 +67,7 @@ func run() error {
 		Sessions:          auth.NewSessions(pool),
 		RateLimits:        store.NewRateLimitTable(pool),
 		Spaces:            sync.NewSpaces(pool, blobStore),
+		Media:             sync.NewMedia(pool, blobStore),
 		MinimumAppVersion: settings.minimumAppVersion,
 		MaxItemBytes:      settings.maxItemBytes,
 	})

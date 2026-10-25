@@ -88,6 +88,26 @@ func (store *S3Store) ObjectSize(ctx context.Context, objectKey string) (int64, 
 	return aws.ToInt64(head.ContentLength), nil
 }
 
+func (store *S3Store) ObjectSizesUnder(ctx context.Context, prefix string) (map[string]int64, error) {
+	objectSizes := make(map[string]int64)
+	pages := s3.NewListObjectsV2Paginator(store.client, &s3.ListObjectsV2Input{
+		Bucket: aws.String(store.bucket),
+		Prefix: aws.String(prefix),
+	}, func(options *s3.ListObjectsV2PaginatorOptions) {
+		options.StopOnDuplicateToken = true
+	})
+	for pages.HasMorePages() {
+		page, err := pages.NextPage(ctx)
+		if err != nil {
+			return nil, fmt.Errorf("list objects: %w", err)
+		}
+		for _, object := range page.Contents {
+			objectSizes[aws.ToString(object.Key)] = aws.ToInt64(object.Size)
+		}
+	}
+	return objectSizes, nil
+}
+
 func (store *S3Store) DeleteObject(ctx context.Context, objectKey string) error {
 	_, err := store.client.DeleteObject(ctx, &s3.DeleteObjectInput{
 		Bucket: aws.String(store.bucket),

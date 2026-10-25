@@ -6,6 +6,8 @@ import (
 	"log/slog"
 
 	"github.com/robfig/cron/v3"
+
+	"github.com/emberr-app/emberr-server/internal/blob"
 )
 
 type Scheduler struct {
@@ -26,12 +28,13 @@ func StartScheduler(ctx context.Context, cleanup *Cleanup) (*Scheduler, error) {
 	scheduledJobs := []scheduledJob{
 		{name: "delete due objects", schedule: "@every 8m", run: cleanup.DeleteDueObjects},
 		{name: "queue expired pending uploads", schedule: "@every 5m", run: cleanup.QueueExpiredPendingUploads},
+		{name: "queue expired media uploads", schedule: "@every 5m", run: cleanup.QueueExpiredMediaUploads},
 		{name: "remove expired codes and rate limits", schedule: "@every 1m", run: cleanup.RemoveExpiredCodesAndRateLimits},
 	}
 	for _, job := range scheduledJobs {
 		_, err := timer.AddFunc(job.schedule, func() {
 			if err := job.run(jobContext); err != nil {
-				slog.Error("scheduled job failed", "job", job.name, "error", withoutRequestURL(err))
+				slog.Error("scheduled job failed", "job", job.name, "error", blob.WithoutRequestURL(err))
 			}
 		})
 		if err != nil {

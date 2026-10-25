@@ -3,6 +3,7 @@ package testutil
 import (
 	"context"
 	"errors"
+	"strings"
 	"sync"
 
 	"github.com/emberr-app/emberr-server/internal/blob"
@@ -34,6 +35,18 @@ func (store *FakeBlobStore) ObjectSize(ctx context.Context, objectKey string) (i
 		return 0, blob.ErrObjectNotFound
 	}
 	return size, nil
+}
+
+func (store *FakeBlobStore) ObjectSizesUnder(ctx context.Context, prefix string) (map[string]int64, error) {
+	store.lock.Lock()
+	defer store.lock.Unlock()
+	objectSizes := make(map[string]int64)
+	for objectKey, size := range store.objectSizes {
+		if strings.HasPrefix(objectKey, prefix) {
+			objectSizes[objectKey] = size
+		}
+	}
+	return objectSizes, nil
 }
 
 func (store *FakeBlobStore) DeleteObject(ctx context.Context, objectKey string) error {
@@ -69,6 +82,10 @@ func (store *FakeBlobStore) PutObject(objectKey string, sizeBytes int64) {
 		store.objectSizes = make(map[string]int64)
 	}
 	store.objectSizes[objectKey] = sizeBytes
+}
+
+func FakeObjectKeyOf(uploadURL string) string {
+	return strings.TrimPrefix(uploadURL, fakeBlobAddress+"upload/")
 }
 
 func FakeDownloadURL(objectKey string) string {
