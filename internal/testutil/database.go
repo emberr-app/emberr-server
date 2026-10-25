@@ -1,10 +1,13 @@
 package testutil
 
 import (
+	"context"
+	"crypto/rand"
 	"os"
 	"strings"
 	"testing"
 
+	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 )
 
@@ -37,5 +40,30 @@ func OpenTestDatabase(t *testing.T) *pgxpool.Pool {
 	if !strings.HasPrefix(databaseName, TestDatabaseNamePrefix) {
 		t.Fatalf("refusing to run database tests against %q: the test database name must start with %q", databaseName, TestDatabaseNamePrefix)
 	}
+	return pool
+}
+
+func OpenThrowawayDatabase(t *testing.T) *pgxpool.Pool {
+	t.Helper()
+
+	testDatabase := OpenTestDatabase(t)
+	databaseName := TestDatabaseNamePrefix + "_throwaway_" + strings.ToLower(rand.Text())
+	quotedDatabaseName := pgx.Identifier{databaseName}.Sanitize()
+	if _, err := testDatabase.Exec(t.Context(), `CREATE DATABASE `+quotedDatabaseName); err != nil {
+		t.Fatalf("create throwaway database: %v", err)
+	}
+	t.Cleanup(func() {
+		if _, err := testDatabase.Exec(context.Background(), `DROP DATABASE IF EXISTS `+quotedDatabaseName+` WITH (FORCE)`); err != nil {
+			t.Errorf("drop throwaway database: %v", err)
+		}
+	})
+
+	config := testDatabase.Config()
+	config.ConnConfig.Database = databaseName
+	pool, err := pgxpool.NewWithConfig(t.Context(), config)
+	if err != nil {
+		t.Fatalf("configure throwaway database pool: %v", err)
+	}
+	t.Cleanup(pool.Close)
 	return pool
 }

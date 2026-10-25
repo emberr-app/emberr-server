@@ -209,6 +209,14 @@ func checkBaseRevision(currentItem store.Item, exists bool, baseRevision int64) 
 }
 
 func (spaces *Spaces) checkUploadedBlob(ctx context.Context, accountID int64, spaceRef int64, item store.Item) error {
+	_, found, err := spaces.spaceTable.FindRevisions(ctx, accountID, spaceRef)
+	if err != nil {
+		return err
+	}
+	if !found {
+		return ErrSpaceNotFound
+	}
+
 	upload, found, err := spaces.spaceTable.FindPendingUpload(ctx, *item.BlobObjectKey)
 	if err != nil {
 		return err

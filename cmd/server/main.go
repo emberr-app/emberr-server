@@ -17,6 +17,7 @@ import (
 	"github.com/emberr-app/emberr-server/internal/auth"
 	"github.com/emberr-app/emberr-server/internal/blob"
 	"github.com/emberr-app/emberr-server/internal/email"
+	"github.com/emberr-app/emberr-server/internal/jobs"
 	"github.com/emberr-app/emberr-server/internal/store"
 	"github.com/emberr-app/emberr-server/internal/sync"
 )
@@ -58,16 +59,22 @@ func run() error {
 
 	emailProtector := auth.NewEmailProtector(settings.emailEncryptionKey, settings.emailHashKey)
 	emailCodes := auth.NewEmailCodes(pool, email.NewSMTPSender(settings.smtp), emailProtector)
+	blobStore := blob.NewS3Store(settings.s3)
 	router := api.NewRouter(api.Services{
 		Database:          pool,
 		EmailCodes:        emailCodes,
 		Accounts:          auth.NewAccounts(pool, emailCodes, emailProtector, settings.fakeSaltKey),
 		Sessions:          auth.NewSessions(pool),
 		RateLimits:        store.NewRateLimitTable(pool),
-		Spaces:            sync.NewSpaces(pool, blob.NewS3Store(settings.s3)),
+		Spaces:            sync.NewSpaces(pool, blobStore),
 		MinimumAppVersion: settings.minimumAppVersion,
 		MaxItemBytes:      settings.maxItemBytes,
 	})
+
+	jobScheduler, err := jobs.StartScheduler(ctx, jobs.NewCleanup(pool, blobStore))
+	if err != nil {
+		return err
+	}
 
 	server := &http.Server{
 		Addr:    net.JoinHostPort("", settings.httpPort),
@@ -92,6 +99,9 @@ func run() error {
 	shutdownContext, cancelShutdown := context.WithTimeout(context.Background(), shutdownTimeout)
 	defer cancelShutdown()
 
+	if err := jobScheduler.Stop(shutdownContext); err != nil {
+		return fmt.Errorf("stop scheduled jobs: %w", err)
+	}
 	if err := server.Shutdown(shutdownContext); err != nil {
 		return fmt.Errorf("shut down http server: %w", err)
 	}

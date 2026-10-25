@@ -1,0 +1,3 @@
+DROP INDEX pending_uploads_expires_at_index;
+
+DROP INDEX object_deletions_delete_after_index;

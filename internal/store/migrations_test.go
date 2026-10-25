@@ -3,11 +3,9 @@ package store
 import (
 	"bytes"
 	"context"
-	"crypto/rand"
 	"errors"
 	"os"
 	"slices"
-	"strings"
 	"testing"
 
 	"github.com/golang-migrate/migrate/v4"
@@ -23,7 +21,7 @@ const testMigrationsFolder = "../../migrations"
 var accountTableNames = []string{"account_keys", "accounts", "email_codes", "items", "object_deletions", "pending_uploads", "rate_limits", "sessions", "spaces"}
 
 func TestMigrationsCreateAndDropAccountTables(t *testing.T) {
-	pool := openThrowawayDatabase(t)
+	pool := testutil.OpenThrowawayDatabase(t)
 	migrator := newTestMigrator(t, pool)
 
 	runMigration(t, "up", migrator.Up)
@@ -95,31 +93,6 @@ func TestDeletingAnAccountRemovesItsKeysAndSessions(t *testing.T) {
 			t.Errorf("%s still has %d rows for the deleted account", childTable, remainingRows)
 		}
 	}
-}
-
-func openThrowawayDatabase(t *testing.T) *pgxpool.Pool {
-	t.Helper()
-
-	testDatabase := testutil.OpenTestDatabase(t)
-	databaseName := testutil.TestDatabaseNamePrefix + "_migrations_" + strings.ToLower(rand.Text())
-	quotedDatabaseName := pgx.Identifier{databaseName}.Sanitize()
-	if _, err := testDatabase.Exec(t.Context(), `CREATE DATABASE `+quotedDatabaseName); err != nil {
-		t.Fatalf("create throwaway database: %v", err)
-	}
-	t.Cleanup(func() {
-		if _, err := testDatabase.Exec(context.Background(), `DROP DATABASE IF EXISTS `+quotedDatabaseName+` WITH (FORCE)`); err != nil {
-			t.Errorf("drop throwaway database: %v", err)
-		}
-	})
-
-	config := testDatabase.Config()
-	config.ConnConfig.Database = databaseName
-	pool, err := pgxpool.NewWithConfig(t.Context(), config)
-	if err != nil {
-		t.Fatalf("configure throwaway database pool: %v", err)
-	}
-	t.Cleanup(pool.Close)
-	return pool
 }
 
 func newTestMigrator(t *testing.T, pool *pgxpool.Pool) *migrate.Migrate {

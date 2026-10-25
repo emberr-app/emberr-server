@@ -87,3 +87,14 @@ func (store *S3Store) ObjectSize(ctx context.Context, objectKey string) (int64, 
 	}
 	return aws.ToInt64(head.ContentLength), nil
 }
+
+func (store *S3Store) DeleteObject(ctx context.Context, objectKey string) error {
+	_, err := store.client.DeleteObject(ctx, &s3.DeleteObjectInput{
+		Bucket: aws.String(store.bucket),
+		Key:    aws.String(objectKey),
+	})
+	if err != nil {
+		return fmt.Errorf("delete object: %w", err)
+	}
+	return nil
+}

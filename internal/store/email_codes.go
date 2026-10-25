@@ -67,3 +67,11 @@ func (table EmailCodeTable) Delete(ctx context.Context, emailHash string, purpos
 	}
 	return result.RowsAffected() > 0, nil
 }
+
+func (table EmailCodeTable) DeleteExpired(ctx context.Context) (int64, error) {
+	result, err := table.pool.Exec(ctx, `DELETE FROM email_codes WHERE expires_at < now_utc_micro_seconds()`)
+	if err != nil {
+		return 0, fmt.Errorf("delete expired email codes: %w", err)
+	}
+	return result.RowsAffected(), nil
+}
