@@ -36,9 +36,10 @@ type syncStateResponse struct {
 }
 
 type changesResponse struct {
-	Items   []store.Item `json:"items"`
-	Latest  int64        `json:"latest"`
-	HasMore bool         `json:"hasMore"`
+	Items      []store.Item      `json:"items"`
+	MediaLocks []store.MediaLock `json:"mediaLocks"`
+	Latest     int64             `json:"latest"`
+	HasMore    bool              `json:"hasMore"`
 }
 
 type resyncRequiredResponse struct {
@@ -106,7 +107,7 @@ func handleSpaceChanges(spaces *sync.Spaces) http.HandlerFunc {
 			writeJSON(w, resyncRequiredResponse{ResyncRequired: true, Latest: page.Latest})
 			return
 		}
-		writeJSON(w, changesResponse{Items: page.Items, Latest: page.Latest, HasMore: page.HasMore})
+		writeJSON(w, changesResponse{Items: page.Items, MediaLocks: page.MediaLocks, Latest: page.Latest, HasMore: page.HasMore})
 	}
 }
 

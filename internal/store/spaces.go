@@ -160,7 +160,7 @@ func (table SpaceTable) ListChangedItems(ctx context.Context, spaceRef int64, af
 	return items, nil
 }
 
-func (table SpaceTable) UpdateLocked(ctx context.Context, ownerAccountID int64, spaceRef int64, change func(space LockedSpace) error) (bool, error) {
+func (table SpaceTable) UpdateLocked(ctx context.Context, ownerAccountID int64, spaceRef int64, change func(space *LockedSpace) error) (bool, error) {
 	found := false
 	err := pgx.BeginFunc(ctx, table.pool, func(tx pgx.Tx) error {
 		space := LockedSpace{tx: tx, spaceRef: spaceRef, ownerAccountID: ownerAccountID}
@@ -175,7 +175,7 @@ func (table SpaceTable) UpdateLocked(ctx context.Context, ownerAccountID int64, 
 			return fmt.Errorf("lock space: %w", err)
 		}
 		found = true
-		return change(space)
+		return change(&space)
 	})
 	if err != nil {
 		return false, fmt.Errorf("update space: %w", err)
@@ -183,7 +183,7 @@ func (table SpaceTable) UpdateLocked(ctx context.Context, ownerAccountID int64, 
 	return found, nil
 }
 
-func (space LockedSpace) FindItem(ctx context.Context, itemID string) (Item, bool, error) {
+func (space *LockedSpace) FindItem(ctx context.Context, itemID string) (Item, bool, error) {
 	var item Item
 	err := space.tx.QueryRow(ctx,
 		`SELECT `+itemColumns+` FROM items WHERE space_ref = $1 AND item_id = $2`,
@@ -198,7 +198,7 @@ func (space LockedSpace) FindItem(ctx context.Context, itemID string) (Item, boo
 	return item, true, nil
 }
 
-func (space LockedSpace) SaveItemAsNextRevision(ctx context.Context, item Item, storageChangeBytes int64) (int64, error) {
+func (space *LockedSpace) SaveItemAsNextRevision(ctx context.Context, item Item) (int64, error) {
 	nextRevision := space.latestRevision + 1
 	_, err := space.tx.Exec(ctx,
 		`INSERT INTO items (
@@ -228,17 +228,28 @@ func (space LockedSpace) SaveItemAsNextRevision(ctx context.Context, item Item, 
 		return 0, fmt.Errorf("save item: %w", err)
 	}
 
-	_, err = space.tx.Exec(ctx, `UPDATE spaces SET latest_revision = $2 WHERE space_ref = $1`, space.spaceRef, nextRevision)
-	if err != nil {
-		return 0, fmt.Errorf("raise space revision: %w", err)
-	}
-
-	_, err = space.tx.Exec(ctx,
-		`UPDATE accounts SET storage_used_bytes = storage_used_bytes + $2 WHERE account_id = $1`,
-		space.ownerAccountID, storageChangeBytes,
-	)
-	if err != nil {
-		return 0, fmt.Errorf("update storage used: %w", err)
+	if err := space.raiseLatestRevisionTo(ctx, nextRevision); err != nil {
+		return 0, err
 	}
 	return nextRevision, nil
+}
+
+func (space *LockedSpace) ChangeStorageUsed(ctx context.Context, changeBytes int64) error {
+	_, err := space.tx.Exec(ctx,
+		`UPDATE accounts SET storage_used_bytes = storage_used_bytes + $2 WHERE account_id = $1`,
+		space.ownerAccountID, changeBytes,
+	)
+	if err != nil {
+		return fmt.Errorf("update storage used: %w", err)
+	}
+	return nil
+}
+
+func (space *LockedSpace) raiseLatestRevisionTo(ctx context.Context, revision int64) error {
+	_, err := space.tx.Exec(ctx, `UPDATE spaces SET latest_revision = $2 WHERE space_ref = $1`, space.spaceRef, revision)
+	if err != nil {
+		return fmt.Errorf("raise space revision: %w", err)
+	}
+	space.latestRevision = revision
+	return nil
 }

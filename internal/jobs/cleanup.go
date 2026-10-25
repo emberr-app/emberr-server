@@ -109,6 +109,25 @@ func (cleanup *Cleanup) QueueExpiredMediaUploads(ctx context.Context) error {
 	return nil
 }
 
+func (cleanup *Cleanup) QueueUnusedMediaFiles(ctx context.Context) error {
+	var totalRemoved int64
+	for {
+		removedCount, err := cleanup.mediaTable.QueueUnusedFilesForDeletion(ctx, cleanupBatchSize, sync.UnusedMediaDeletionDelay)
+		if err != nil {
+			return err
+		}
+		totalRemoved += removedCount
+		if removedCount < cleanupBatchSize {
+			break
+		}
+	}
+
+	if totalRemoved > 0 {
+		slog.Info("queued unused media files for deletion", "files", totalRemoved)
+	}
+	return nil
+}
+
 func (cleanup *Cleanup) RemoveExpiredCodesAndRateLimits(ctx context.Context) error {
 	deletedCodes, err := cleanup.emailCodeTable.DeleteExpired(ctx)
 	if err != nil {

@@ -50,6 +50,9 @@ func NewRouter(services Services) http.Handler {
 	versionedRoutes.Handle("DELETE "+spaceItemPath, signedIn(handleDeleteItem(services.Spaces)))
 	versionedRoutes.Handle("POST "+mediaUploadURLsPath, signedIn(handleCreateMediaUploadURLs(services.Media)))
 	versionedRoutes.Handle("PUT "+mediaPath, signedIn(handleCommitMedia(services.Media)))
+	versionedRoutes.Handle("POST "+mediaDownloadURLsPath, signedIn(handleCreateMediaDownloadURLs(services.Media)))
+	versionedRoutes.Handle("PUT "+mediaLockPath, signedIn(handleAddMediaLock(services.Spaces)))
+	versionedRoutes.Handle("DELETE "+mediaLockPath, signedIn(handleRemoveMediaLock(services.Spaces)))
 
 	mux := http.NewServeMux()
 	mux.HandleFunc("GET /health", handleHealth(services.Database))

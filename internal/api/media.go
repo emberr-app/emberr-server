@@ -8,9 +8,10 @@ import (
 )
 
 const (
-	mediaPath           = "/v1/media/{mediaId}"
-	mediaUploadURLsPath = mediaPath + "/upload-urls"
-	maxMediaPieceCount  = 10000
+	mediaPath             = "/v1/media/{mediaId}"
+	mediaUploadURLsPath   = mediaPath + "/upload-urls"
+	mediaDownloadURLsPath = mediaPath + "/download-urls"
+	maxMediaPieceCount    = 10000
 )
 
 type mediaUploadURLsRequest struct {
@@ -25,6 +26,11 @@ type mediaUploadURLsResponse struct {
 
 type commitMediaResponse struct {
 	SizeBytes int64 `json:"sizeBytes"`
+}
+
+type mediaDownloadURLsResponse struct {
+	Pieces    []sync.MediaPieceDownloadURL `json:"pieces"`
+	ExpiresAt int64                        `json:"expiresAt"`
 }
 
 func handleCreateMediaUploadURLs(media *sync.Media) http.HandlerFunc {
@@ -67,6 +73,23 @@ func handleCommitMedia(media *sync.Media) http.HandlerFunc {
 			return
 		}
 		writeJSON(w, commitMediaResponse{SizeBytes: sizeBytes})
+	}
+}
+
+func handleCreateMediaDownloadURLs(media *sync.Media) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		mediaID := r.PathValue("mediaId")
+		if err := checkSyncID("mediaId", mediaID); err != nil {
+			writeError(w, r, err)
+			return
+		}
+
+		downloadURLs, err := media.CreateDownloadURLs(r.Context(), signedInAccountID(r.Context()), mediaID)
+		if err != nil {
+			writeError(w, r, err)
+			return
+		}
+		writeJSON(w, mediaDownloadURLsResponse{Pieces: downloadURLs.Pieces, ExpiresAt: downloadURLs.ExpiresAt})
 	}
 }
 

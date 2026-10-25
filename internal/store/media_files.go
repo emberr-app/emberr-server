@@ -147,7 +147,7 @@ func (file *LockedMediaFile) StartOver(ctx context.Context, newUpload MediaUploa
 }
 
 func (file *LockedMediaFile) Commit(ctx context.Context) error {
-	_, err := file.tx.Exec(ctx, `UPDATE media_files SET committed_at = now_utc_micro_seconds() WHERE media_id = $1`, file.mediaID)
+	_, err := file.tx.Exec(ctx, `UPDATE media_files SET committed_at = now_utc_micro_seconds(), unused_since = now_utc_micro_seconds() WHERE media_id = $1`, file.mediaID)
 	if err != nil {
 		return fmt.Errorf("mark media file committed: %w", err)
 	}
@@ -187,6 +187,43 @@ func (table MediaTable) QueueExpiredUnfinishedUploadsForDeletion(ctx context.Con
 	).Scan(&removedCount)
 	if err != nil {
 		return 0, fmt.Errorf("queue expired media uploads for deletion: %w", err)
+	}
+	return removedCount, nil
+}
+
+func (table MediaTable) QueueUnusedFilesForDeletion(ctx context.Context, maxCount int, unusedFor time.Duration) (int64, error) {
+	var removedCount int64
+	err := table.pool.QueryRow(ctx,
+		`WITH unused_media AS (
+			DELETE FROM media_files
+			WHERE media_id IN (
+				SELECT media_id FROM media_files
+				WHERE committed_at IS NOT NULL AND unused_since <= now_utc_micro_seconds() - $2
+					AND NOT EXISTS (SELECT 1 FROM media_locks WHERE media_locks.media_id = media_files.media_id AND media_locks.deleted = FALSE)
+				LIMIT $1
+				FOR UPDATE SKIP LOCKED
+			)
+			RETURNING media_id, account_id, upload_id, piece_sizes, size_bytes
+		),
+		queued_deletions AS (
+			INSERT INTO object_deletions (object_key, delete_after)
+			SELECT `+mediaPieceKeyColumn+`, now_utc_micro_seconds()
+			FROM unused_media AS media, `+everyMediaPiece+`
+			ON CONFLICT (object_key) DO NOTHING
+		),
+		removed_bytes_per_account AS (
+			SELECT account_id, sum(size_bytes)::bigint AS removed_bytes FROM unused_media GROUP BY account_id
+		),
+		lowered_storage AS (
+			UPDATE accounts SET storage_used_bytes = accounts.storage_used_bytes - removed_bytes_per_account.removed_bytes
+			FROM removed_bytes_per_account
+			WHERE accounts.account_id = removed_bytes_per_account.account_id
+		)
+		SELECT count(*) FROM unused_media`,
+		maxCount, unusedFor.Microseconds(),
+	).Scan(&removedCount)
+	if err != nil {
+		return 0, fmt.Errorf("queue unused media files for deletion: %w", err)
 	}
 	return removedCount, nil
 }

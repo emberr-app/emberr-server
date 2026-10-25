@@ -303,6 +303,38 @@ func (table AccountTable) EraseAllData(ctx context.Context, accountID int64) err
 			return fmt.Errorf("turn items into tombstones: %w", err)
 		}
 
+		_, err = tx.Exec(ctx,
+			`WITH numbered_live_locks AS (
+				SELECT media_locks.space_ref, media_locks.media_id, media_locks.note_id,
+					spaces.latest_revision + row_number() OVER (PARTITION BY media_locks.space_ref ORDER BY media_locks.note_id, media_locks.media_id) AS tombstone_revision
+				FROM media_locks JOIN spaces ON spaces.space_ref = media_locks.space_ref
+				WHERE spaces.owner_account_id = $1 AND media_locks.deleted = FALSE
+			),
+			erased_locks AS (
+				UPDATE media_locks SET
+					deleted = TRUE,
+					encrypted_key = NULL,
+					encrypted_key_nonce = NULL,
+					revision = numbered_live_locks.tombstone_revision,
+					updated_at = now_utc_micro_seconds()
+				FROM numbered_live_locks
+				WHERE media_locks.space_ref = numbered_live_locks.space_ref
+					AND media_locks.media_id = numbered_live_locks.media_id
+					AND media_locks.note_id = numbered_live_locks.note_id
+				RETURNING media_locks.space_ref
+			),
+			erased_counts AS (
+				SELECT space_ref, count(*) AS erased_count FROM erased_locks GROUP BY space_ref
+			)
+			UPDATE spaces SET latest_revision = spaces.latest_revision + erased_counts.erased_count
+			FROM erased_counts
+			WHERE spaces.space_ref = erased_counts.space_ref`,
+			accountID,
+		)
+		if err != nil {
+			return fmt.Errorf("turn media locks into tombstones: %w", err)
+		}
+
 		_, err = tx.Exec(ctx, `UPDATE accounts SET storage_used_bytes = 0 WHERE account_id = $1`, accountID)
 		if err != nil {
 			return fmt.Errorf("reset storage used: %w", err)
