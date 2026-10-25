@@ -14,4 +14,5 @@ type Store interface {
 	SignedUploadURL(ctx context.Context, objectKey string, sizeBytes int64) (string, error)
 	SignedDownloadURL(ctx context.Context, objectKey string) (string, error)
 	ObjectSize(ctx context.Context, objectKey string) (int64, error)
+	DeleteObject(ctx context.Context, objectKey string) error
 }

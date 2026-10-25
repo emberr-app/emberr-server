@@ -7,6 +7,7 @@ require (
 	github.com/aws/aws-sdk-go-v2/service/s3 v1.114.5
 	github.com/golang-migrate/migrate/v4 v4.20.1
 	github.com/jackc/pgx/v5 v5.11.0
+	github.com/robfig/cron/v3 v3.0.1
 	golang.org/x/crypto v0.57.0
 )
 

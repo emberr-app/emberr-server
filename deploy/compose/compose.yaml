@@ -3,7 +3,7 @@ services:
     build:
       context: ../..
     ports:
-      - 8080:8080
+      - ${EMBERR_HOST_PORT:-8080}:8080
     depends_on:
       postgres:
         condition: service_healthy

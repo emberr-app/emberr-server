@@ -44,6 +44,19 @@ func TestCommitNamingAKeyNotHandedOutForThatItemIsRefusedAndChangesNothing(t *te
 	server.commitItem(t, account.token, space.SpaceRef, "other-note", newTestNote(otherItemUpload.ObjectKey, testBlobBytes))
 }
 
+func TestBlobCommitToAnotherAccountsSpaceAnswersNotFound(t *testing.T) {
+	server := newTestServer(t)
+	owner := server.signUp(t)
+	stranger := server.signUp(t)
+	space := server.registerSpace(t, owner.token, rand.Text(), randomBase64(lockedKeyLength))
+	ownerUpload := server.uploadBlob(t, owner.token, space.SpaceRef, "note", testBlobBytes)
+
+	response := server.sendSignedIn(http.MethodPut, itemPath(space.SpaceRef, "note"), stranger.token, newTestNote(ownerUpload.ObjectKey, testBlobBytes))
+
+	requireErrorCode(t, response, http.StatusNotFound, "NOT_FOUND")
+	server.commitItem(t, owner.token, space.SpaceRef, "note", newTestNote(ownerUpload.ObjectKey, testBlobBytes))
+}
+
 func TestCommitWhoseStoredSizeDiffersFromSizeBytesIsRefused(t *testing.T) {
 	server := newTestServer(t)
 	account := server.signUp(t)

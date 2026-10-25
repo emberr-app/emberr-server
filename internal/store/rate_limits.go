@@ -32,3 +32,11 @@ func (table RateLimitTable) CountAttempt(ctx context.Context, limitKey string, l
 	}
 	return attemptCount <= limit, nil
 }
+
+func (table RateLimitTable) DeleteEnded(ctx context.Context) (int64, error) {
+	result, err := table.pool.Exec(ctx, `DELETE FROM rate_limits WHERE window_ends_at < now_utc_micro_seconds()`)
+	if err != nil {
+		return 0, fmt.Errorf("delete ended rate limits: %w", err)
+	}
+	return result.RowsAffected(), nil
+}
