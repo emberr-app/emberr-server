@@ -104,6 +104,37 @@ func (table SpaceTable) Register(ctx context.Context, space NewSpace) (Space, er
 	return storedSpace, nil
 }
 
+func (table SpaceTable) FindByClientSpaceID(ctx context.Context, ownerAccountID int64, clientSpaceID string) (Space, bool, error) {
+	var space Space
+	err := table.pool.QueryRow(ctx,
+		`SELECT `+spaceColumns+` FROM spaces WHERE owner_account_id = $1 AND client_space_id = $2`,
+		ownerAccountID, clientSpaceID,
+	).Scan(spaceScanTargets(&space)...)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return Space{}, false, nil
+	}
+	if err != nil {
+		return Space{}, false, fmt.Errorf("load space: %w", err)
+	}
+	return space, true, nil
+}
+
+func (table SpaceTable) StoredItemSize(ctx context.Context, ownerAccountID int64, spaceRef int64, itemID string) (int64, error) {
+	var sizeBytes int64
+	err := table.pool.QueryRow(ctx,
+		`SELECT items.size_bytes FROM items JOIN spaces ON spaces.space_ref = items.space_ref
+		WHERE items.space_ref = $1 AND items.item_id = $2 AND spaces.owner_account_id = $3`,
+		spaceRef, itemID, ownerAccountID,
+	).Scan(&sizeBytes)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return 0, nil
+	}
+	if err != nil {
+		return 0, fmt.Errorf("load stored item size: %w", err)
+	}
+	return sizeBytes, nil
+}
+
 func (table SpaceTable) ListForOwner(ctx context.Context, ownerAccountID int64) ([]Space, error) {
 	rows, err := table.pool.Query(ctx,
 		`SELECT `+spaceColumns+` FROM spaces WHERE owner_account_id = $1 ORDER BY space_ref`,

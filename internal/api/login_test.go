@@ -236,7 +236,7 @@ func newTestServer(t *testing.T) testServer {
 	router := NewRouter(Services{
 		Database:     pool,
 		EmailCodes:   emailCodes,
-		Accounts:     auth.NewAccounts(pool, emailCodes, emailProtector, [auth.FakeSaltKeyLength]byte{3}),
+		Accounts:     auth.NewAccounts(pool, emailCodes, emailProtector, [auth.FakeSaltKeyLength]byte{3}, store.Trial{StorageLimitBytes: testTrialStorageBytes, Length: testTrialLength}),
 		Sessions:     sessions,
 		RateLimits:   store.NewRateLimitTable(pool),
 		Spaces:       sync.NewSpaces(pool, blobStore),

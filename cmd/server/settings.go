@@ -8,17 +8,23 @@ import (
 	"os"
 	"strconv"
 	"strings"
+	"time"
 
 	"github.com/emberr-app/emberr-server/internal/api"
 	"github.com/emberr-app/emberr-server/internal/auth"
 	"github.com/emberr-app/emberr-server/internal/blob"
 	"github.com/emberr-app/emberr-server/internal/email"
+	"github.com/emberr-app/emberr-server/internal/store"
 )
 
 const (
-	defaultHTTPPort       = "8080"
-	defaultSMTPSenderName = "Emberr"
-	defaultMaxItemBytes   = 50 << 20
+	defaultHTTPPort          = "8080"
+	defaultSMTPSenderName    = "Emberr"
+	defaultMaxItemBytes      = 50 << 20
+	defaultTrialStorageBytes = 100 << 20
+	defaultTrialDays         = 14
+	maxTrialDays             = 36500
+	oneDay                   = 24 * time.Hour
 )
 
 type serverSettings struct {
@@ -40,6 +46,8 @@ type serverSettings struct {
 
 	s3           blob.S3Settings
 	maxItemBytes int64
+
+	trial store.Trial
 }
 
 func loadSettings() (serverSettings, error) {
@@ -79,6 +87,7 @@ func loadSettings() (serverSettings, error) {
 			UsePathStyle:   true,
 		},
 		maxItemBytes: defaultMaxItemBytes,
+		trial:        store.Trial{StorageLimitBytes: defaultTrialStorageBytes, Length: defaultTrialDays * oneDay},
 	}
 	encodedEmailEncryptionKey := readRequired("EMBERR_KEY_ENCRYPTION")
 	encodedEmailHashKey := readRequired("EMBERR_KEY_HASH")
@@ -125,6 +134,22 @@ func loadSettings() (serverSettings, error) {
 			return serverSettings{}, fmt.Errorf("EMBERR_MAX_ITEM_BYTES must be a whole number of 1 or more, got %q", maxItemBytes)
 		}
 		settings.maxItemBytes = parsedMaxItemBytes
+	}
+
+	if trialStorageBytes := os.Getenv("EMBERR_TRIAL_STORAGE_BYTES"); trialStorageBytes != "" {
+		parsedTrialStorageBytes, err := strconv.ParseInt(trialStorageBytes, 10, 64)
+		if err != nil || parsedTrialStorageBytes < 1 {
+			return serverSettings{}, fmt.Errorf("EMBERR_TRIAL_STORAGE_BYTES must be a whole number of 1 or more, got %q", trialStorageBytes)
+		}
+		settings.trial.StorageLimitBytes = parsedTrialStorageBytes
+	}
+
+	if trialDays := os.Getenv("EMBERR_TRIAL_DAYS"); trialDays != "" {
+		parsedTrialDays, err := strconv.Atoi(trialDays)
+		if err != nil || parsedTrialDays < 1 || parsedTrialDays > maxTrialDays {
+			return serverSettings{}, fmt.Errorf("EMBERR_TRIAL_DAYS must be a whole number from 1 to %d, got %q", maxTrialDays, trialDays)
+		}
+		settings.trial.Length = time.Duration(parsedTrialDays) * oneDay
 	}
 
 	if settings.httpPort == "" {
