@@ -147,7 +147,7 @@ func (file *LockedMediaFile) StartOver(ctx context.Context, newUpload MediaUploa
 }
 
 func (file *LockedMediaFile) Commit(ctx context.Context) error {
-	_, err := file.tx.Exec(ctx, `UPDATE media_files SET committed_at = now_utc_micro_seconds(), unused_since = now_utc_micro_seconds() WHERE media_id = $1`, file.mediaID)
+	_, err := file.tx.Exec(ctx, `UPDATE media_files SET committed_at = now_utc_micro_seconds(), unused_since = now_utc_micro_seconds(), counted_in_storage = TRUE WHERE media_id = $1`, file.mediaID)
 	if err != nil {
 		return fmt.Errorf("mark media file committed: %w", err)
 	}
@@ -203,7 +203,7 @@ func (table MediaTable) QueueUnusedFilesForDeletion(ctx context.Context, maxCoun
 				LIMIT $1
 				FOR UPDATE SKIP LOCKED
 			)
-			RETURNING media_id, account_id, upload_id, piece_sizes, size_bytes
+			RETURNING media_id, account_id, upload_id, piece_sizes, size_bytes, counted_in_storage
 		),
 		queued_deletions AS (
 			INSERT INTO object_deletions (object_key, delete_after)
@@ -212,7 +212,7 @@ func (table MediaTable) QueueUnusedFilesForDeletion(ctx context.Context, maxCoun
 			ON CONFLICT (object_key) DO NOTHING
 		),
 		removed_bytes_per_account AS (
-			SELECT account_id, sum(size_bytes)::bigint AS removed_bytes FROM unused_media GROUP BY account_id
+			SELECT account_id, sum(size_bytes)::bigint AS removed_bytes FROM unused_media WHERE counted_in_storage GROUP BY account_id
 		),
 		lowered_storage AS (
 			UPDATE accounts SET storage_used_bytes = accounts.storage_used_bytes - removed_bytes_per_account.removed_bytes

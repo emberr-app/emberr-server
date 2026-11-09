@@ -159,6 +159,39 @@ func TestMediaFileUnusedForOverEightDaysIsRemovedWhileARecentlyUnusedOneStays(t 
 	}
 }
 
+func TestUnusedJobLowersStorageOnlyForAFileThatStillCounts(t *testing.T) {
+	cleanup, pool, _ := newTestCleanup(t)
+	accountID := addTestAccount(t, pool)
+	longUnused := time.Now().Add(-sync.UnusedMediaDeletionDelay - time.Hour)
+	for _, mediaID := range []string{"media_never_locked", "media_lost_its_lock"} {
+		addMediaFile(t, pool, accountID, mediaID, time.Now(), true)
+		markMediaFileUnusedSince(t, pool, mediaID, longUnused)
+	}
+	if _, err := pool.Exec(t.Context(), `UPDATE media_files SET counted_in_storage = FALSE WHERE media_id = 'media_lost_its_lock'`); err != nil {
+		t.Fatalf("mark media file not counted: %v", err)
+	}
+	if _, err := pool.Exec(t.Context(), `UPDATE accounts SET storage_used_bytes = $2 WHERE account_id = $1`, accountID, 2*testObjectBytes); err != nil {
+		t.Fatalf("set storage used: %v", err)
+	}
+
+	if err := cleanup.QueueUnusedMediaFiles(t.Context()); err != nil {
+		t.Fatal(err)
+	}
+
+	for _, mediaID := range []string{"media_never_locked", "media_lost_its_lock"} {
+		if hasMediaFile(t, pool, mediaID) {
+			t.Errorf("%s is still there", mediaID)
+		}
+	}
+	var storageUsed int64
+	if err := pool.QueryRow(t.Context(), `SELECT storage_used_bytes FROM accounts WHERE account_id = $1`, accountID).Scan(&storageUsed); err != nil {
+		t.Fatalf("load storage used: %v", err)
+	}
+	if storageUsed != 0 {
+		t.Errorf("storage used = %d, want 0", storageUsed)
+	}
+}
+
 func newTestCleanup(t *testing.T) (*Cleanup, *pgxpool.Pool, *testutil.FakeBlobStore) {
 	t.Helper()
 

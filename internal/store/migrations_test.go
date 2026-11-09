@@ -95,6 +95,70 @@ func TestDeletingAnAccountRemovesItsKeysAndSessions(t *testing.T) {
 	}
 }
 
+func TestMigrationNineRecomputesStorageFromLiveItemsAndCountedFiles(t *testing.T) {
+	pool := testutil.OpenThrowawayDatabase(t)
+	migrator := newTestMigrator(t, pool)
+	runMigration(t, "up to 8", func() error { return migrator.Migrate(8) })
+	ctx := t.Context()
+
+	var accountID, spaceRef int64
+	err := pool.QueryRow(ctx,
+		`INSERT INTO accounts (email_hash, encrypted_email, encrypted_email_nonce, storage_used_bytes) VALUES ('email-hash', 'email', 'nonce', 999999) RETURNING account_id`,
+	).Scan(&accountID)
+	if err != nil {
+		t.Fatalf("insert account: %v", err)
+	}
+	err = pool.QueryRow(ctx,
+		`INSERT INTO spaces (owner_account_id, client_space_id, kind, encrypted_key, encrypted_key_nonce) VALUES ($1, 'space', 'space', 'key', 'nonce') RETURNING space_ref`,
+		accountID,
+	).Scan(&spaceRef)
+	if err != nil {
+		t.Fatalf("insert space: %v", err)
+	}
+	_, err = pool.Exec(ctx,
+		`INSERT INTO items (space_ref, item_id, item_type, payload_version, revision, size_bytes) VALUES ($1, 'note', 'NOTE', 1, 1, 100)`,
+		spaceRef,
+	)
+	if err != nil {
+		t.Fatalf("insert item: %v", err)
+	}
+	_, err = pool.Exec(ctx,
+		`INSERT INTO media_files (media_id, account_id, upload_id, piece_sizes, size_bytes, expires_at, committed_at, unused_since) VALUES
+			('media_used', $1, 'upload', '{1000}', 1000, 0, 1, NULL),
+			('media_lost_its_lock', $1, 'upload', '{20000}', 20000, 0, 1, 2)`,
+		accountID,
+	)
+	if err != nil {
+		t.Fatalf("insert media files: %v", err)
+	}
+	_, err = pool.Exec(ctx,
+		`INSERT INTO media_locks (space_ref, media_id, note_id, encrypted_key, encrypted_key_nonce, revision, deleted) VALUES
+			($1, 'media_used', 'note', 'key', 'nonce', 2, FALSE),
+			($1, 'media_lost_its_lock', 'note', NULL, NULL, 3, TRUE)`,
+		spaceRef,
+	)
+	if err != nil {
+		t.Fatalf("insert media locks: %v", err)
+	}
+
+	runMigration(t, "up to 9", func() error { return migrator.Migrate(9) })
+
+	var storageUsed int64
+	if err := pool.QueryRow(ctx, `SELECT storage_used_bytes FROM accounts WHERE account_id = $1`, accountID).Scan(&storageUsed); err != nil {
+		t.Fatalf("load storage used: %v", err)
+	}
+	if storageUsed != 1100 {
+		t.Errorf("storage used = %d, want 1100 (the live item and the file still in use)", storageUsed)
+	}
+	var lostFileCounted bool
+	if err := pool.QueryRow(ctx, `SELECT counted_in_storage FROM media_files WHERE media_id = 'media_lost_its_lock'`).Scan(&lostFileCounted); err != nil {
+		t.Fatalf("load counted in storage: %v", err)
+	}
+	if lostFileCounted {
+		t.Error("the file that lost its last lock still counts")
+	}
+}
+
 func newTestMigrator(t *testing.T, pool *pgxpool.Pool) *migrate.Migrate {
 	t.Helper()
 
