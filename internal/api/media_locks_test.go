@@ -97,6 +97,34 @@ func TestFileBecomesUnusedOnlyWhenItsLastLockIsRemovedAndANewLockClearsIt(t *tes
 	}
 }
 
+func TestStorageDropsWhenTheLastLockGoesAndRisesOnceWhenALockBringsTheFileBack(t *testing.T) {
+	server := newTestServer(t)
+	account := server.signUp(t)
+	space := server.registerSpace(t, account.token, rand.Text(), randomBase64(lockedKeyLength))
+	mediaID := server.addCommittedMedia(t, account.token)
+	server.commitTestNote(t, account.token, space.SpaceRef, "note")
+	server.addMediaLock(t, account.token, space.SpaceRef, mediaID, "note", newTestMediaLock())
+	storageWithFile := server.storageUsed(t, account.token)
+	var fileBytes int64
+	for _, pieceSize := range testPieceSizes {
+		fileBytes += pieceSize
+	}
+
+	server.removeMediaLock(t, account.token, space.SpaceRef, mediaID, "note")
+	if storage := server.storageUsed(t, account.token); storage != storageWithFile-fileBytes {
+		t.Fatalf("storage after removing the only lock = %d, want %d", storage, storageWithFile-fileBytes)
+	}
+	server.addMediaLock(t, account.token, space.SpaceRef, mediaID, "note", newTestMediaLock())
+	if storage := server.storageUsed(t, account.token); storage != storageWithFile {
+		t.Fatalf("storage after adding the lock back = %d, want %d", storage, storageWithFile)
+	}
+	server.removeMediaLock(t, account.token, space.SpaceRef, mediaID, "note")
+	server.removeMediaLock(t, account.token, space.SpaceRef, mediaID, "note")
+	if storage := server.storageUsed(t, account.token); storage != storageWithFile-fileBytes {
+		t.Fatalf("storage after removing the lock again = %d, want %d", storage, storageWithFile-fileBytes)
+	}
+}
+
 func TestDeletingANoteTombstonesItsLocksAndMarksOnlyFilesWithoutALiveLockUnused(t *testing.T) {
 	server := newTestServer(t)
 	account := server.signUp(t)

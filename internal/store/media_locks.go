@@ -144,7 +144,18 @@ func (space *LockedSpace) TombstoneLiveMediaLocksOfNote(ctx context.Context, not
 }
 
 func (space *LockedSpace) MarkMediaFileUsed(ctx context.Context, mediaID string) error {
-	_, err := space.tx.Exec(ctx, `UPDATE media_files SET unused_since = NULL WHERE media_id = $1`, mediaID)
+	_, err := space.tx.Exec(ctx,
+		`WITH file_before_change AS (
+			SELECT account_id, size_bytes, counted_in_storage FROM media_files WHERE media_id = $1
+		),
+		marked_file AS (
+			UPDATE media_files SET unused_since = NULL, counted_in_storage = TRUE WHERE media_id = $1
+		)
+		UPDATE accounts SET storage_used_bytes = accounts.storage_used_bytes + file_before_change.size_bytes
+		FROM file_before_change
+		WHERE accounts.account_id = file_before_change.account_id AND NOT file_before_change.counted_in_storage`,
+		mediaID,
+	)
 	if err != nil {
 		return fmt.Errorf("mark media file used: %w", err)
 	}
@@ -153,9 +164,22 @@ func (space *LockedSpace) MarkMediaFileUsed(ctx context.Context, mediaID string)
 
 func (space *LockedSpace) MarkMediaFilesUnusedWhereNoLiveLockIsLeft(ctx context.Context, mediaIDs []string) error {
 	_, err := space.tx.Exec(ctx,
-		`UPDATE media_files SET unused_since = now_utc_micro_seconds()
-		WHERE media_id = ANY($1)
-			AND NOT EXISTS (SELECT 1 FROM media_locks WHERE media_locks.media_id = media_files.media_id AND media_locks.deleted = FALSE)`,
+		`WITH files_without_live_lock AS (
+			SELECT media_id, account_id, size_bytes, counted_in_storage FROM media_files
+			WHERE media_id = ANY($1)
+				AND NOT EXISTS (SELECT 1 FROM media_locks WHERE media_locks.media_id = media_files.media_id AND media_locks.deleted = FALSE)
+		),
+		marked_files AS (
+			UPDATE media_files SET unused_since = now_utc_micro_seconds(), counted_in_storage = FALSE
+			FROM files_without_live_lock
+			WHERE media_files.media_id = files_without_live_lock.media_id
+		),
+		removed_bytes_per_account AS (
+			SELECT account_id, sum(size_bytes)::bigint AS removed_bytes FROM files_without_live_lock WHERE counted_in_storage GROUP BY account_id
+		)
+		UPDATE accounts SET storage_used_bytes = accounts.storage_used_bytes - removed_bytes_per_account.removed_bytes
+		FROM removed_bytes_per_account
+		WHERE accounts.account_id = removed_bytes_per_account.account_id`,
 		mediaIDs,
 	)
 	if err != nil {
