@@ -52,6 +52,8 @@ var (
 	errMediaLockMissing = &apiError{Code: "NOT_FOUND", Message: "no such media lock in this space", statusCode: http.StatusNotFound}
 	errMediaTooLarge    = &apiError{Code: "REQUEST_TOO_LARGE", Message: fmt.Sprintf("a media file must be at most %d bytes", sync.MaxMediaBytes), statusCode: http.StatusRequestEntityTooLarge}
 	errPayloadTooLarge  = &apiError{Code: "REQUEST_TOO_LARGE", Message: "inlinePayload must be at most 1 MiB", statusCode: http.StatusRequestEntityTooLarge}
+	errNoSubscription   = &apiError{Code: "NO_ACTIVE_SUBSCRIPTION", Message: "the trial or plan has ended, the cloud copy is read-only", statusCode: http.StatusPaymentRequired}
+	errStorageLimit     = &apiError{Code: "STORAGE_LIMIT_EXCEEDED", Message: "this upload would go over the storage limit", statusCode: http.StatusUpgradeRequired}
 	errBadSessionID     = newBadRequestError("id is not a session id")
 	errMissingEmailCode = newBadRequestError("code is missing")
 	errUnknownUpload    = newBadRequestError("objectKey was not handed out for this item or has expired, ask for a new upload URL")
@@ -116,6 +118,10 @@ func writeError(w http.ResponseWriter, r *http.Request, err error) {
 		responseError = errNoCommittedMedia
 	case errors.Is(err, sync.ErrMediaLockNotFound):
 		responseError = errMediaLockMissing
+	case errors.Is(err, sync.ErrNoActiveSubscription):
+		responseError = errNoSubscription
+	case errors.Is(err, sync.ErrStorageLimitExceeded):
+		responseError = errStorageLimit
 	default:
 		slog.ErrorContext(r.Context(), "request failed", "route", r.Pattern, "error", blob.WithoutRequestURL(err))
 		responseError = errInternal

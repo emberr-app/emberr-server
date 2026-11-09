@@ -58,12 +58,13 @@ func run() error {
 	}
 
 	emailProtector := auth.NewEmailProtector(settings.emailEncryptionKey, settings.emailHashKey)
-	emailCodes := auth.NewEmailCodes(pool, email.NewSMTPSender(settings.smtp), emailProtector)
+	mailSender := email.NewSMTPSender(settings.smtp)
+	emailCodes := auth.NewEmailCodes(pool, mailSender, emailProtector)
 	blobStore := blob.NewS3Store(settings.s3)
 	router := api.NewRouter(api.Services{
 		Database:          pool,
 		EmailCodes:        emailCodes,
-		Accounts:          auth.NewAccounts(pool, emailCodes, emailProtector, settings.fakeSaltKey),
+		Accounts:          auth.NewAccounts(pool, emailCodes, emailProtector, settings.fakeSaltKey, settings.trial),
 		Sessions:          auth.NewSessions(pool),
 		RateLimits:        store.NewRateLimitTable(pool),
 		Spaces:            sync.NewSpaces(pool, blobStore),
@@ -72,7 +73,7 @@ func run() error {
 		MaxItemBytes:      settings.maxItemBytes,
 	})
 
-	jobScheduler, err := jobs.StartScheduler(ctx, jobs.NewCleanup(pool, blobStore))
+	jobScheduler, err := jobs.StartScheduler(ctx, jobs.NewCleanup(pool, blobStore), jobs.NewTrialEnd(pool, mailSender, emailProtector))
 	if err != nil {
 		return err
 	}

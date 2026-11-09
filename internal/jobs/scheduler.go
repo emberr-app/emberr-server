@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"log/slog"
+	"sync"
 
 	"github.com/robfig/cron/v3"
 
@@ -13,15 +14,17 @@ import (
 type Scheduler struct {
 	timer             *cron.Cron
 	cancelRunningJobs context.CancelFunc
+	runsAtStart       sync.WaitGroup
 }
 
 type scheduledJob struct {
-	name     string
-	schedule string
-	run      func(ctx context.Context) error
+	name       string
+	schedule   string
+	run        func(ctx context.Context) error
+	runAtStart bool
 }
 
-func StartScheduler(ctx context.Context, cleanup *Cleanup) (*Scheduler, error) {
+func StartScheduler(ctx context.Context, cleanup *Cleanup, trialEnd *TrialEnd) (*Scheduler, error) {
 	jobContext, cancelRunningJobs := context.WithCancel(ctx)
 	timer := cron.New(cron.WithChain(cron.SkipIfStillRunning(cron.DefaultLogger)))
 
@@ -31,9 +34,11 @@ func StartScheduler(ctx context.Context, cleanup *Cleanup) (*Scheduler, error) {
 		{name: "queue expired media uploads", schedule: "@every 5m", run: cleanup.QueueExpiredMediaUploads},
 		{name: "queue unused media files", schedule: "@every 1h", run: cleanup.QueueUnusedMediaFiles},
 		{name: "remove expired codes and rate limits", schedule: "@every 1m", run: cleanup.RemoveExpiredCodesAndRateLimits},
+		{name: "warn and remove ended trials", schedule: "@every 24h", run: trialEnd.WarnAndRemoveEndedTrials, runAtStart: true},
 	}
+	var jobsToRunAtStart []cron.Job
 	for _, job := range scheduledJobs {
-		_, err := timer.AddFunc(job.schedule, func() {
+		entryID, err := timer.AddFunc(job.schedule, func() {
 			if err := job.run(jobContext); err != nil {
 				slog.Error("scheduled job failed", "job", job.name, "error", blob.WithoutRequestURL(err))
 			}
@@ -42,19 +47,33 @@ func StartScheduler(ctx context.Context, cleanup *Cleanup) (*Scheduler, error) {
 			cancelRunningJobs()
 			return nil, fmt.Errorf("schedule %s: %w", job.name, err)
 		}
+		if job.runAtStart {
+			jobsToRunAtStart = append(jobsToRunAtStart, timer.Entry(entryID).WrappedJob)
+		}
 	}
 
 	timer.Start()
-	return &Scheduler{timer: timer, cancelRunningJobs: cancelRunningJobs}, nil
+	scheduler := &Scheduler{timer: timer, cancelRunningJobs: cancelRunningJobs}
+	for _, job := range jobsToRunAtStart {
+		scheduler.runsAtStart.Go(job.Run)
+	}
+	return scheduler, nil
 }
 
 func (scheduler *Scheduler) Stop(ctx context.Context) error {
 	jobsFinished := scheduler.timer.Stop()
 	scheduler.cancelRunningJobs()
-	select {
-	case <-jobsFinished.Done():
-		return nil
-	case <-ctx.Done():
-		return fmt.Errorf("wait for running jobs: %w", ctx.Err())
+	runsAtStartFinished := make(chan struct{})
+	go func() {
+		scheduler.runsAtStart.Wait()
+		close(runsAtStartFinished)
+	}()
+	for _, finished := range []<-chan struct{}{jobsFinished.Done(), runsAtStartFinished} {
+		select {
+		case <-finished:
+		case <-ctx.Done():
+			return fmt.Errorf("wait for running jobs: %w", ctx.Err())
+		}
 	}
+	return nil
 }

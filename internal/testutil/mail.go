@@ -2,12 +2,15 @@ package testutil
 
 import (
 	"context"
+	"errors"
 	"sync"
 	"testing"
 	"time"
 )
 
 const mailWaitLimit = 5 * time.Second
+
+var errFakeSendFailed = errors.New("fake mail sender refused the email")
 
 type SentMail struct {
 	ToEmail string
@@ -16,15 +19,28 @@ type SentMail struct {
 }
 
 type FakeMailSender struct {
-	lock      sync.Mutex
-	sentMails []SentMail
+	lock           sync.Mutex
+	sentMails      []SentMail
+	emailsThatFail map[string]bool
 }
 
 func (sender *FakeMailSender) Send(ctx context.Context, toEmail string, subject string, body string) error {
 	sender.lock.Lock()
 	defer sender.lock.Unlock()
+	if sender.emailsThatFail[toEmail] {
+		return errFakeSendFailed
+	}
 	sender.sentMails = append(sender.sentMails, SentMail{ToEmail: toEmail, Subject: subject, Body: body})
 	return nil
+}
+
+func (sender *FakeMailSender) FailSendsTo(toEmail string) {
+	sender.lock.Lock()
+	defer sender.lock.Unlock()
+	if sender.emailsThatFail == nil {
+		sender.emailsThatFail = make(map[string]bool)
+	}
+	sender.emailsThatFail[toEmail] = true
 }
 
 func (sender *FakeMailSender) SentMails() []SentMail {

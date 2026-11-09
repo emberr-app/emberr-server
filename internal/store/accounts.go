@@ -38,6 +38,7 @@ type NewAccount struct {
 	Keys                AccountKeys
 	SessionTokenHash    []byte
 	DeviceName          string
+	Trial               Trial
 }
 
 type LoginRecord struct {
@@ -136,6 +137,10 @@ func (table AccountTable) CreateWithSession(ctx context.Context, account NewAcco
 		)
 		if err != nil {
 			return fmt.Errorf("insert account keys: %w", err)
+		}
+
+		if err := insertTrial(ctx, tx, accountID, account.Trial); err != nil {
+			return err
 		}
 
 		return insertSession(ctx, tx, account.SessionTokenHash, accountID, account.DeviceName)
@@ -343,6 +348,32 @@ func (table AccountTable) EraseAllData(ctx context.Context, accountID int64) err
 	})
 	if err != nil {
 		return fmt.Errorf("erase account data: %w", err)
+	}
+	return nil
+}
+
+func (table AccountTable) RemoveCloudCopy(ctx context.Context, accountID int64) error {
+	err := pgx.BeginFunc(ctx, table.pool, func(tx pgx.Tx) error {
+		if err := lockSpacesAndQueueEveryBlobForDeletionNow(ctx, tx, accountID); err != nil {
+			return err
+		}
+
+		_, err := tx.Exec(ctx, `DELETE FROM spaces WHERE owner_account_id = $1`, accountID)
+		if err != nil {
+			return fmt.Errorf("delete spaces: %w", err)
+		}
+		_, err = tx.Exec(ctx, `UPDATE accounts SET storage_used_bytes = 0 WHERE account_id = $1`, accountID)
+		if err != nil {
+			return fmt.Errorf("reset storage used: %w", err)
+		}
+		_, err = tx.Exec(ctx, `UPDATE subscriptions SET cloud_copy_removed_at = now_utc_micro_seconds() WHERE account_id = $1`, accountID)
+		if err != nil {
+			return fmt.Errorf("mark cloud copy removed: %w", err)
+		}
+		return nil
+	})
+	if err != nil {
+		return fmt.Errorf("remove cloud copy: %w", err)
 	}
 	return nil
 }

@@ -18,6 +18,10 @@ var (
 )
 
 func (spaces *Spaces) AddMediaLock(ctx context.Context, accountID int64, spaceRef int64, lock store.MediaLock) (int64, error) {
+	if err := checkUploadAllowed(ctx, spaces.subscriptionTable, accountID, 0); err != nil {
+		return 0, err
+	}
+
 	var revision int64
 	found, err := spaces.spaceTable.UpdateLocked(ctx, accountID, spaceRef, func(space *store.LockedSpace) error {
 		note, exists, err := space.FindItem(ctx, lock.NoteID)

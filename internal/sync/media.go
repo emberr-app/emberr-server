@@ -50,18 +50,30 @@ type MediaDownloadURLs struct {
 }
 
 type Media struct {
-	mediaTable store.MediaTable
-	blobStore  blob.Store
+	mediaTable        store.MediaTable
+	subscriptionTable store.SubscriptionTable
+	blobStore         blob.Store
 }
 
 func NewMedia(pool *pgxpool.Pool, blobStore blob.Store) *Media {
-	return &Media{mediaTable: store.NewMediaTable(pool), blobStore: blobStore}
+	return &Media{mediaTable: store.NewMediaTable(pool), subscriptionTable: store.NewSubscriptionTable(pool), blobStore: blobStore}
 }
 
 func (media *Media) CreateUploadURLs(ctx context.Context, accountID int64, mediaID string, pieceSizes []int64) (MediaUploadURLs, error) {
 	newUpload := store.MediaUpload{UploadID: rand.Text(), PieceSizes: pieceSizes}
 	for _, pieceSize := range pieceSizes {
 		newUpload.SizeBytes += pieceSize
+	}
+	existingFile, _, err := media.mediaTable.Find(ctx, accountID, mediaID)
+	if err != nil {
+		return MediaUploadURLs{}, err
+	}
+	newBytes := newUpload.SizeBytes
+	if existingFile.Committed {
+		newBytes = 0
+	}
+	if err := checkUploadAllowed(ctx, media.subscriptionTable, accountID, newBytes); err != nil {
+		return MediaUploadURLs{}, err
 	}
 
 	var upload store.MediaUpload
@@ -116,6 +128,13 @@ func (media *Media) Commit(ctx context.Context, accountID int64, mediaID string)
 	}
 	if !found {
 		return 0, ErrMediaNotFound
+	}
+	newBytes := file.Upload.SizeBytes
+	if file.Committed {
+		newBytes = 0
+	}
+	if err := checkUploadAllowed(ctx, media.subscriptionTable, accountID, newBytes); err != nil {
+		return 0, err
 	}
 	if file.Committed {
 		return file.Upload.SizeBytes, nil

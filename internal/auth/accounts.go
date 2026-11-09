@@ -38,24 +38,28 @@ type Signup struct {
 }
 
 type Accounts struct {
-	accountTable   store.AccountTable
-	sessionTable   store.SessionTable
-	rateLimits     store.RateLimitTable
-	emailCodes     *EmailCodes
-	mailSender     MailSender
-	emailProtector EmailProtector
-	fakeSaltKey    [FakeSaltKeyLength]byte
+	accountTable      store.AccountTable
+	sessionTable      store.SessionTable
+	subscriptionTable store.SubscriptionTable
+	rateLimits        store.RateLimitTable
+	emailCodes        *EmailCodes
+	mailSender        MailSender
+	emailProtector    EmailProtector
+	fakeSaltKey       [FakeSaltKeyLength]byte
+	trial             store.Trial
 }
 
-func NewAccounts(pool *pgxpool.Pool, emailCodes *EmailCodes, emailProtector EmailProtector, fakeSaltKey [FakeSaltKeyLength]byte) *Accounts {
+func NewAccounts(pool *pgxpool.Pool, emailCodes *EmailCodes, emailProtector EmailProtector, fakeSaltKey [FakeSaltKeyLength]byte, trial store.Trial) *Accounts {
 	return &Accounts{
-		accountTable:   store.NewAccountTable(pool),
-		sessionTable:   store.NewSessionTable(pool),
-		rateLimits:     store.NewRateLimitTable(pool),
-		emailCodes:     emailCodes,
-		mailSender:     emailCodes.mailSender,
-		emailProtector: emailProtector,
-		fakeSaltKey:    fakeSaltKey,
+		accountTable:      store.NewAccountTable(pool),
+		sessionTable:      store.NewSessionTable(pool),
+		subscriptionTable: store.NewSubscriptionTable(pool),
+		rateLimits:        store.NewRateLimitTable(pool),
+		emailCodes:        emailCodes,
+		mailSender:        emailCodes.mailSender,
+		emailProtector:    emailProtector,
+		fakeSaltKey:       fakeSaltKey,
+		trial:             trial,
 	}
 }
 
@@ -91,6 +95,7 @@ func (accounts *Accounts) SignUp(ctx context.Context, signup Signup) (string, er
 		Keys:                signup.Keys,
 		SessionTokenHash:    tokenHash,
 		DeviceName:          signup.DeviceName,
+		Trial:               accounts.trial,
 	})
 	if err != nil {
 		return "", err

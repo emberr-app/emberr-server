@@ -45,15 +45,26 @@ type UploadURL struct {
 }
 
 type Spaces struct {
-	spaceTable store.SpaceTable
-	blobStore  blob.Store
+	spaceTable        store.SpaceTable
+	subscriptionTable store.SubscriptionTable
+	blobStore         blob.Store
 }
 
 func NewSpaces(pool *pgxpool.Pool, blobStore blob.Store) *Spaces {
-	return &Spaces{spaceTable: store.NewSpaceTable(pool), blobStore: blobStore}
+	return &Spaces{spaceTable: store.NewSpaceTable(pool), subscriptionTable: store.NewSubscriptionTable(pool), blobStore: blobStore}
 }
 
 func (spaces *Spaces) Register(ctx context.Context, space store.NewSpace) (store.Space, error) {
+	existingSpace, found, err := spaces.spaceTable.FindByClientSpaceID(ctx, space.OwnerAccountID, space.ClientSpaceID)
+	if err != nil {
+		return store.Space{}, err
+	}
+	if found {
+		return existingSpace, nil
+	}
+	if err := checkUploadAllowed(ctx, spaces.subscriptionTable, space.OwnerAccountID, 0); err != nil {
+		return store.Space{}, err
+	}
 	return spaces.spaceTable.Register(ctx, space)
 }
 
@@ -94,6 +105,9 @@ func (spaces *Spaces) Changes(ctx context.Context, accountID int64, spaceRef int
 }
 
 func (spaces *Spaces) CreateUploadURL(ctx context.Context, accountID int64, spaceRef int64, itemID string, sizeBytes int64) (UploadURL, error) {
+	if err := checkUploadAllowed(ctx, spaces.subscriptionTable, accountID, sizeBytes); err != nil {
+		return UploadURL{}, err
+	}
 	_, found, err := spaces.spaceTable.FindRevisions(ctx, accountID, spaceRef)
 	if err != nil {
 		return UploadURL{}, err
@@ -123,6 +137,14 @@ func (spaces *Spaces) CreateUploadURL(ctx context.Context, accountID int64, spac
 }
 
 func (spaces *Spaces) CommitItem(ctx context.Context, accountID int64, spaceRef int64, baseRevision int64, item store.Item) (int64, error) {
+	storedSize, err := spaces.spaceTable.StoredItemSize(ctx, accountID, spaceRef, item.ItemID)
+	if err != nil {
+		return 0, err
+	}
+	if err := checkUploadAllowed(ctx, spaces.subscriptionTable, accountID, item.SizeBytes-storedSize); err != nil {
+		return 0, err
+	}
+
 	if item.BlobObjectKey != nil {
 		if err := spaces.checkUploadedBlob(ctx, accountID, spaceRef, item); err != nil {
 			return 0, err

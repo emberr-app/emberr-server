@@ -15,9 +15,10 @@ var (
 )
 
 type AccountDetails struct {
-	Email            string            `json:"email"`
-	StorageUsedBytes int64             `json:"storageUsedBytes"`
-	Keys             store.AccountKeys `json:"keys"`
+	Email            string             `json:"email"`
+	StorageUsedBytes int64              `json:"storageUsedBytes"`
+	Keys             store.AccountKeys  `json:"keys"`
+	Subscription     store.Subscription `json:"subscription"`
 }
 
 type PasswordChange struct {
@@ -33,7 +34,11 @@ func (accounts *Accounts) Details(ctx context.Context, accountID int64) (Account
 	if err != nil {
 		return AccountDetails{}, err
 	}
-	return AccountDetails{Email: email, StorageUsedBytes: account.StorageUsedBytes, Keys: account.Keys}, nil
+	subscription, err := accounts.subscriptionTable.Find(ctx, accountID)
+	if err != nil {
+		return AccountDetails{}, err
+	}
+	return AccountDetails{Email: email, StorageUsedBytes: account.StorageUsedBytes, Keys: account.Keys, Subscription: subscription}, nil
 }
 
 func (accounts *Accounts) ChangePassword(ctx context.Context, accountID int64, change PasswordChange) error {
